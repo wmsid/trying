@@ -8,7 +8,7 @@ End-user experience:
 ```
 # Windows (admin PowerShell)             # macOS
 .\install.ps1                            sudo ./install.sh
-vpnagent up --setup-key abcd             sudo vpnagent up --setup-key abcd
+slbzt up --setup-key abcd             sudo slbzt up --setup-key abcd
 ```
 (or one step: `.\install.ps1 -SetupKey abcd` / `sudo ./install.sh abcd`)
 
@@ -29,6 +29,12 @@ Hand users the archive for their OS plus a setup key from your dashboard.
 - Default management URL -> `MGMT_URL`.
 - Points upstream docs/telemetry/updater-key endpoints at nothing (metrics push is already off by default).
 - Keeps the Go module path (invisible to users) so upstream upgrades are a version bump.
+
+## Running next to stock NetBird
+Everything that could collide is separate: service name, config/log/state dirs, daemon socket/pipe,
+firewall chain names, WireGuard interface (`slbzt0`, `utun150` on macOS) and listen port (51821 vs 51820).
+Remaining caveat: both overlays should use **different IP ranges** (your management server's
+network range vs NetBird's default 100.64.0.0/10) and not push conflicting DNS/routes.
 
 ## Requirements / caveats
 - You need a NetBird **management server** (self-hosted) - it issues setup keys. The client is only the peer side.

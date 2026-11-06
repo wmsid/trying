@@ -34,6 +34,12 @@ grep -rl 'https://docs.netbird.io' client --include=*.go | xargs -r sed -i 's#ht
 
 sed -i 's/non-netbird\.io domains/non-internal domains/' client/cmd/root.go
 
+# Coexistence: separate WireGuard interface name and listen port
+sed -i "s#\"wt0\"#\"${WG_IFACE}\"#" client/iface/configurer/name.go
+sed -i "s#\"utun100\"#\"${WG_IFACE_DARWIN}\"#" client/iface/configurer/name_darwin.go
+sed -i "s#DefaultWgPort *= 51820#DefaultWgPort = ${WG_PORT}#" client/iface/iface.go
+grep -q "$WG_IFACE" client/iface/configurer/name.go && grep -q "$WG_PORT" client/iface/iface.go || { echo "coexistence patch failed"; exit 1; }
+
 # Leave nothing behind
 LEFT=$(grep -rniE 'netbird' client/cmd/root.go client/cmd/service.go client/cmd/up.go client/cmd/status.go \
         | grep -vE 'github.com/netbirdio|migrateToNetbird' || true)

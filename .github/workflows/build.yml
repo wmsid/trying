@@ -1,7 +1,11 @@
 name: build
 on:
-  push: { tags: ['v*'] }
+  push:
+    tags: ['v*']
+    branches: ['claude/headless-softether-client-s13nn0']
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest

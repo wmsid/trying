@@ -42,6 +42,10 @@ network range vs NetBird's default 100.64.0.0/10) and not push conflicting DNS/r
 - Built with `CGO_ENABLED=0`; cross-compiled, so macOS/Windows runtime behavior was **not** tested here.
 - The rebrand patch is regex-based; when bumping `NETBIRD_VERSION`, check the build output for `WARN: leftover brand strings`.
 
+## Linux
+`*_linux_{amd64,arm64,arm,386}.tar.gz`: `tar xzf ...; cd ...; sudo ./install.sh [SETUP_KEY]` installs a systemd
+(or init) service via `slbzt service install`. Static binaries (no libc dependency).
+
 ## Windows 7 / 8 / 8.1
 `*_windows7_{amd64,386}.zip` are compiled with the community Go fork go-legacy-win7 (pinned in `brand.env`),
 because official Go dropped Win7 in 1.21. They compile cleanly but are **untested on real Windows 7**.

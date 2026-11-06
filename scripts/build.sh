@@ -17,10 +17,10 @@ pack() { # pack <os> <arch> <label> <gobin>
   GOOS=$os GOARCH=$arch "$gobin" build -ldflags "$LDF" -o "$out/${BRAND_NAME}${ext}" ./client
   cp "$ROOT/brand.env" "$out/brand.env"
   if [ "$os" = windows ]; then cp "$ROOT"/installers/windows/*.ps1 "$out/"; (cd "$DIST" && zip -qr "$pkg.zip" "$pkg")
-  else cp "$ROOT"/installers/macos/*.sh "$out/"; chmod +x "$out"/*.sh; tar -C "$DIST" -czf "$DIST/$pkg.tar.gz" "$pkg"; fi
+  else cp "$ROOT"/installers/$([ "$os" = linux ] && echo linux || echo macos)/*.sh "$out/"; chmod +x "$out"/*.sh; tar -C "$DIST" -czf "$DIST/$pkg.tar.gz" "$pkg"; fi
   rm -rf "$out"
 }
-for t in ${TARGETS:-windows/amd64 windows/arm64 darwin/amd64 darwin/arm64}; do pack "${t%/*}" "${t#*/}" "${t%/*}" go; done
+for t in ${TARGETS:-windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 linux/arm linux/386}; do pack "${t%/*}" "${t#*/}" "${t%/*}" go; done
 
 # Windows 7/8/8.1: needs a community-patched Go toolchain (official Go dropped Win7 in 1.21).
 # Built from source at a pinned tag; used ONLY for these two archives.

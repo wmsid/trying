@@ -10,14 +10,24 @@ git clone -q --depth 1 --branch "$NETBIRD_VERSION" https://github.com/netbirdio/
 cd "$WORK/src"
 export GOTOOLCHAIN=auto CGO_ENABLED=0
 LDF="-s -w -X github.com/netbirdio/netbird/version.version=${BUILD_VERSION}"
-for t in ${TARGETS:-windows/amd64 windows/arm64 darwin/amd64 darwin/arm64}; do
-  os=${t%/*}; arch=${t#*/}; ext=""; [ "$os" = windows ] && ext=".exe"
-  pkg="${BRAND_NAME}_${BUILD_VERSION}_${os}_${arch}"; out="$DIST/$pkg"; mkdir -p "$out"
-  echo ">> $t"
-  GOOS=$os GOARCH=$arch go build -ldflags "$LDF" -o "$out/${BRAND_NAME}${ext}" ./client
+pack() { # pack <os> <arch> <label> <gobin>
+  local os=$1 arch=$2 label=$3 gobin=$4 ext=""; [ "$os" = windows ] && ext=".exe"
+  local pkg="${BRAND_NAME}_${BUILD_VERSION}_${label}_${arch}"; local out="$DIST/$pkg"; mkdir -p "$out"
+  echo ">> $label/$arch"
+  GOOS=$os GOARCH=$arch "$gobin" build -ldflags "$LDF" -o "$out/${BRAND_NAME}${ext}" ./client
   cp "$ROOT/brand.env" "$out/brand.env"
   if [ "$os" = windows ]; then cp "$ROOT"/installers/windows/*.ps1 "$out/"; (cd "$DIST" && zip -qr "$pkg.zip" "$pkg")
   else cp "$ROOT"/installers/macos/*.sh "$out/"; chmod +x "$out"/*.sh; tar -C "$DIST" -czf "$DIST/$pkg.tar.gz" "$pkg"; fi
   rm -rf "$out"
-done
+}
+for t in ${TARGETS:-windows/amd64 windows/arm64 darwin/amd64 darwin/arm64}; do pack "${t%/*}" "${t#*/}" "${t%/*}" go; done
+
+# Windows 7/8/8.1: needs a community-patched Go toolchain (official Go dropped Win7 in 1.21).
+# Built from source at a pinned tag; used ONLY for these two archives.
+if [ -n "${WIN7_GO_TAG:-}" ] && [ "${SKIP_WIN7:-0}" != 1 ]; then
+  git clone -q --depth 1 --branch "$WIN7_GO_TAG" https://github.com/thongtech/go-legacy-win7.git "$WORK/go7"
+  (cd "$WORK/go7/src" && GOROOT_BOOTSTRAP="$(go env GOROOT)" ./make.bash >/dev/null)
+  G7="$WORK/go7/bin/go"
+  for a in amd64 386; do GOROOT="$WORK/go7" GOTOOLCHAIN=local pack windows "$a" windows7 "$G7"; done
+fi
 ls -la "$DIST"

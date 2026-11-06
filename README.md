@@ -42,6 +42,12 @@ network range vs NetBird's default 100.64.0.0/10) and not push conflicting DNS/r
 - Built with `CGO_ENABLED=0`; cross-compiled, so macOS/Windows runtime behavior was **not** tested here.
 - The rebrand patch is regex-based; when bumping `NETBIRD_VERSION`, check the build output for `WARN: leftover brand strings`.
 
+## Windows 7 / 8 / 8.1
+`*_windows7_{amd64,386}.zip` are compiled with the community Go fork go-legacy-win7 (pinned in `brand.env`),
+because official Go dropped Win7 in 1.21. They compile cleanly but are **untested on real Windows 7**.
+The machine needs SP1 plus the SHA-2 code-signing update (KB4474419) for the network driver to load.
+Set `WIN7_GO_TAG=` empty to skip.
+
 ## Prebuilt binaries
 Every push to the working branch rebuilds and commits the archives into `bin/` (with `SHA256SUMS`).
 Each build adds ~50 MB to repo history; if that grows too large, switch the workflow to force-push

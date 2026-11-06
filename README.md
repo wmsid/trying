@@ -41,3 +41,9 @@ network range vs NetBird's default 100.64.0.0/10) and not push conflicting DNS/r
 - Binaries are unsigned. Sign them (Authenticode on Windows; Developer ID + notarization on macOS) or Gatekeeper/SmartScreen will warn. The macOS script clears the quarantine flag, which helps for CLI use only.
 - Built with `CGO_ENABLED=0`; cross-compiled, so macOS/Windows runtime behavior was **not** tested here.
 - The rebrand patch is regex-based; when bumping `NETBIRD_VERSION`, check the build output for `WARN: leftover brand strings`.
+
+## Prebuilt binaries
+Every push to the working branch rebuilds and commits the archives into `bin/` (with `SHA256SUMS`).
+Each build adds ~50 MB to repo history; if that grows too large, switch the workflow to force-push
+`bin/` to a separate `builds` branch instead. Run `git pull` before pushing your own changes,
+since the bot commits to the same branch.

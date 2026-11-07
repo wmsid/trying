@@ -10,6 +10,7 @@ New-Item -ItemType Directory -Force $dir | Out-Null
 $exe = Join-Path $dir "$name.exe"
 if (Get-Service -Name $name -ErrorAction SilentlyContinue) { & $exe service stop 2>$null; & $exe service uninstall 2>$null }
 Copy-Item "$PSScriptRoot\$name.exe" $exe -Force
+Copy-Item "$PSScriptRoot\wintun.dll" (Join-Path $dir "wintun.dll") -Force
 $machine = [Environment]::GetEnvironmentVariable("Path","Machine")
 if ($machine -notlike "*$dir*") { [Environment]::SetEnvironmentVariable("Path","$machine;$dir","Machine") }
 & $exe service install

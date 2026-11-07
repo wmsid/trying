@@ -1,5 +1,5 @@
 ; Windows setup program. Build with:
-;   makensis -DBRAND=slbzt -DDISPLAY=SLBZT -DVERSION=1.0.0 -DARCH=x64 -DEXE=path\slbzt.exe -DOUT=setup.exe installer.nsi
+;   makensis -DBRAND=slbzt -DDISPLAY=SLBZT -DVERSION=1.0.0 -DARCH=x64 -DEXE=path\slbzt.exe -DWINTUN=path\wintun.dll -DOUT=setup.exe installer.nsi
 ; Silent install:  setup.exe /S /SETUPKEY=abcd        (optional: /MGMT=https://other-server:443)
 ; Silent uninstall: "%ProgramFiles%\slbzt\uninstall.exe" /S
 Unicode true
@@ -80,6 +80,7 @@ Section "Install"
     nsExec::Exec '"$INSTDIR\${BRAND}.exe" service uninstall'
     Sleep 1000
   File "/oname=${BRAND}.exe" "${EXE}"
+  File "/oname=wintun.dll" "${WINTUN}"
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
   ; PATH (machine-wide), only if missing
@@ -144,6 +145,7 @@ Section "Uninstall"
   nsExec::Exec '"$INSTDIR\${BRAND}.exe" service uninstall'
   Sleep 1000
   Delete "$INSTDIR\${BRAND}.exe"
+  Delete "$INSTDIR\wintun.dll"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"
   SetShellVarContext all

@@ -13,5 +13,5 @@ Copy-Item "$PSScriptRoot\$name.exe" $exe -Force
 Copy-Item "$PSScriptRoot\wintun.dll" (Join-Path $dir "wintun.dll") -Force
 & $exe service install
 & $exe service start
-Write-Host "$name service installed and running. Connect with: & "$exe" up --setup-key <KEY>"
+Write-Host "$name service installed and running. Connect with: & '$exe' up --setup-key <KEY>"
 if ($SetupKey) { & $exe up --setup-key $SetupKey }

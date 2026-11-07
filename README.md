@@ -44,7 +44,7 @@ network range vs NetBird's default 100.64.0.0/10) and not push conflicting DNS/r
 
 ## Windows installer (.exe)
 `*_windows_*_setup.exe` / `*_windows7_*_setup.exe` are real setup programs (admin prompt, installs to Program Files,
-adds to PATH, registers the service, shows in Add/Remove Programs, includes an uninstaller).
+registers the service (does not modify PATH; run it from the install folder), shows in Add/Remove Programs, includes an uninstaller).
 Double-click: the wizard requires a setup key (Next is refused without one). Silent / scripted:
 `slbzt_..._setup.exe /S /SETUPKEY=abcd` (key required; optional `/MGMT=https://other:443`).
 Uninstall: Settings > Apps, or `"%ProgramFiles%\slbzt\uninstall.exe" /S`.

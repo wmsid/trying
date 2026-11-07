@@ -56,7 +56,6 @@ Var FinishBtn
 Var Countdown
 Var ResultBox
 Var CopyBtn
-Var PathNote
 Var Connected
 Var DnsName
 Var IpAddr
@@ -120,7 +119,7 @@ Function FinishShow
       Pop $0
       nsDialogs::CreateControl EDIT "${DEFAULT_STYLES}|${WS_TABSTOP}|${ES_AUTOHSCROLL}|${ES_READONLY}" "${WS_EX_CLIENTEDGE}" 120u 107u 140u 13u "$IpAddr"
       Pop $IpBox
-      ${NSD_CreateLabel} 120u 128u 195u 34u "Press Copy to copy the DNS name, or select any text above. Finish becomes available shortly.$PathNote"
+      ${NSD_CreateLabel} 120u 128u 195u 34u "Press Copy to copy the DNS name, or select any text above. Finish becomes available shortly."
       Pop $0
     ${Else}
       ; failure / other message: one read-only multi-line box
@@ -185,16 +184,9 @@ Section "Install"
   File "/oname=wintun.dll" "${WINTUN}"
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
-  ; PATH (machine-wide). Done by a PowerShell helper because NSIS strings are capped at 1024
-  ; chars and would truncate a long PATH. The helper backs up the old PATH and fails safe.
-  SetShellVarContext all
+  ; Setup does NOT touch PATH. The helper below is only used by the uninstaller to remove an entry that
+  ; an earlier version of this setup may have added.
   File "/oname=$INSTDIR\pathtool.ps1" "${PATHTOOL}"
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\pathtool.ps1" -Action add -Dir "$INSTDIR" -BackupDir "$APPDATA\${DISPLAY}"'
-  Pop $0
-  ${If} $0 != 0
-    StrCpy $PathNote "$\r$\n$\r$\nNote: ${DISPLAY} could not be added to PATH (your PATH was left unchanged). Run it as:$\r$\n$\"$INSTDIR\${BRAND}.exe$\" status"
-  ${EndIf}
-  SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
 
   ; Add/Remove Programs
   WriteRegStr HKLM "Software\${BRAND}" "InstallDir" "$INSTDIR"
@@ -272,7 +264,7 @@ Section "Install"
       ClearErrors
       ${WordReplace} "$1" "$\n" "$\r$\n" "+*" $1
       ClearErrors
-      StrCpy $FinishMsg "${DISPLAY} is installed, but connecting failed (code $0).$\r$\n$\r$\n$1$\r$\n$\r$\nCheck the key, then run:$\r$\n${BRAND} up --setup-key <KEY>$PathNote"
+      StrCpy $FinishMsg "${DISPLAY} is installed, but connecting failed (code $0).$\r$\n$\r$\n$1$\r$\n$\r$\nCheck the key, then run (from the install folder):$\r$\n$\"$INSTDIR\${BRAND}.exe$\" up --setup-key <KEY>"
       SetErrorLevel 4
     ${EndIf}
   ${EndIf}
@@ -286,7 +278,7 @@ Section "Uninstall"
   nsExec::Exec '"$INSTDIR\${BRAND}.exe" service stop'
   nsExec::Exec '"$INSTDIR\${BRAND}.exe" service uninstall'
   Sleep 1000
-  ; take our folder off the machine PATH first (uses the helper that setup installed)
+  ; remove our folder from the machine PATH if an earlier setup added it (does nothing if it is not there)
   nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\pathtool.ps1" -Action remove -Dir "$INSTDIR"'
   Pop $0
   SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000

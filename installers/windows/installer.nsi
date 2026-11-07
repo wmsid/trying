@@ -9,6 +9,7 @@ Unicode true
 !include FileFunc.nsh
 !include WordFunc.nsh
 !insertmacro WordReplace
+!insertmacro WordFind
 !insertmacro un.WordReplace
 
 !if "${DISPLAY}" == ""
@@ -56,6 +57,11 @@ Var Countdown
 Var ResultBox
 Var CopyBtn
 Var PathNote
+Var Connected
+Var DnsName
+Var IpAddr
+Var DnsBox
+Var IpBox
 
 Function .onInit
   !if "${ARCH}" != "x86"
@@ -98,13 +104,29 @@ FunctionEnd
 
 Function FinishShow
   ${If} $FinishMsg != ""
-    ; replace the static label with a read-only text box (selectable) plus a Copy button
     ShowWindow $mui.FinishPage.Text ${SW_HIDE}
-    nsDialogs::CreateControl EDIT "${DEFAULT_STYLES}|${WS_TABSTOP}|${WS_VSCROLL}|${ES_MULTILINE}|${ES_READONLY}" "${WS_EX_CLIENTEDGE}" 120u 45u 195u 90u "$FinishMsg"
-    Pop $ResultBox
-    ${NSD_CreateButton} 120u 140u 70u 14u "Copy"
-    Pop $CopyBtn
-    ${NSD_OnClick} $CopyBtn CopyResult
+    ${If} $Connected == 1
+      ${NSD_CreateLabel} 120u 45u 195u 14u "${DISPLAY} is installed and connected."
+      Pop $0
+      ${NSD_CreateLabel} 120u 64u 195u 10u "DNS name:"
+      Pop $0
+      ; read-only single-line boxes: selectable with the mouse / Ctrl+C
+      nsDialogs::CreateControl EDIT "${DEFAULT_STYLES}|${WS_TABSTOP}|${ES_AUTOHSCROLL}|${ES_READONLY}" "${WS_EX_CLIENTEDGE}" 120u 75u 140u 13u "$DnsName"
+      Pop $DnsBox
+      ${NSD_CreateButton} 265u 74u 50u 14u "Copy"
+      Pop $CopyBtn
+      ${NSD_OnClick} $CopyBtn CopyResult
+      ${NSD_CreateLabel} 120u 96u 195u 10u "IP address:"
+      Pop $0
+      nsDialogs::CreateControl EDIT "${DEFAULT_STYLES}|${WS_TABSTOP}|${ES_AUTOHSCROLL}|${ES_READONLY}" "${WS_EX_CLIENTEDGE}" 120u 107u 140u 13u "$IpAddr"
+      Pop $IpBox
+      ${NSD_CreateLabel} 120u 128u 195u 34u "Press Copy to copy the DNS name, or select any text above. Finish becomes available shortly.$PathNote"
+      Pop $0
+    ${Else}
+      ; failure / other message: one read-only multi-line box
+      nsDialogs::CreateControl EDIT "${DEFAULT_STYLES}|${WS_TABSTOP}|${WS_VSCROLL}|${ES_MULTILINE}|${ES_READONLY}" "${WS_EX_CLIENTEDGE}" 120u 45u 195u 110u "$FinishMsg"
+      Pop $ResultBox
+    ${EndIf}
     ; keep Finish disabled for 10 s so the result is not clicked past; the window X still closes setup
     GetDlgItem $FinishBtn $HWNDPARENT 1
     EnableWindow $FinishBtn 0
@@ -115,8 +137,9 @@ Function FinishShow
 FunctionEnd
 
 Function CopyResult
-  SendMessage $ResultBox ${EM_SETSEL} 0 -1
-  SendMessage $ResultBox ${WM_COPY} 0 0
+  ; copy ONLY the DNS name
+  SendMessage $DnsBox ${EM_SETSEL} 0 -1
+  SendMessage $DnsBox ${WM_COPY} 0 0
   SendMessage $CopyBtn ${WM_SETTEXT} 0 "STR:Copied"
 FunctionEnd
 
@@ -213,9 +236,42 @@ Section "Install"
     Pop $1
     Delete "$PLUGINSDIR\key.txt"
     ${If} $0 == 0
-      ; $1 holds: Connected / DNS domain: ... / IP address: ...
-      StrCpy $FinishMsg "${DISPLAY} is installed and connected.$\r$\n$\r$\n$1$\r$\n$\r$\nSelect any text to copy it, or press Copy. Finish becomes available shortly.$PathNote"
+      StrCpy $Connected 1
+      StrCpy $DnsName ""
+      StrCpy $IpAddr ""
+      StrCpy $R2 1
+      parse_loop:
+        ClearErrors
+        ${WordFind} "$1" "$\n" "+$R2" $R3
+        IfErrors parse_done
+        StrCpy $R4 $R3 1 -1
+        StrCmp $R4 "$\r" 0 +2
+          StrCpy $R3 $R3 -1
+        StrCpy $R4 $R3 12
+        StrCmp $R4 "DNS domain: " 0 +3
+          StrCpy $DnsName $R3 "" 12
+          Goto next_line
+        StrCmp $R4 "IP address: " 0 next_line
+          StrCpy $IpAddr $R3 "" 12
+        next_line:
+        IntOp $R2 $R2 + 1
+        Goto parse_loop
+      parse_done:
+      ${If} $DnsName == ""
+        StrCpy $DnsName "(not reported)"
+      ${EndIf}
+      ${If} $IpAddr == ""
+        StrCpy $IpAddr "(not reported)"
+      ${EndIf}
+      StrCpy $FinishMsg "connected"
     ${Else}
+      StrCpy $Connected 0
+      ; make the client's plain line breaks display properly in an edit box
+      ClearErrors
+      ${WordReplace} "$1" "$\r$\n" "$\n" "+*" $1
+      ClearErrors
+      ${WordReplace} "$1" "$\n" "$\r$\n" "+*" $1
+      ClearErrors
       StrCpy $FinishMsg "${DISPLAY} is installed, but connecting failed (code $0).$\r$\n$\r$\n$1$\r$\n$\r$\nCheck the key, then run:$\r$\n${BRAND} up --setup-key <KEY>$PathNote"
       SetErrorLevel 4
     ${EndIf}

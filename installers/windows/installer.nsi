@@ -36,6 +36,8 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 !insertmacro MUI_PAGE_DIRECTORY
 Page custom KeyPageCreate KeyPageLeave
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_TITLE "Installation complete"
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishShow
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -44,6 +46,9 @@ Page custom KeyPageCreate KeyPageLeave
 Var KeyBox
 Var SetupKey
 Var MgmtUrl
+Var FinishMsg
+Var FinishBtn
+Var Countdown
 
 Function .onInit
   !if "${ARCH}" != "x86"
@@ -72,7 +77,31 @@ Function KeyPageLeave
   ${NSD_GetText} $KeyBox $SetupKey
 FunctionEnd
 
+Function FinishShow
+  ${If} $FinishMsg != ""
+    ${NSD_SetText} $mui.FinishPage.Text "$FinishMsg"
+    ; keep Finish disabled for 10 s so the result is not clicked past; the window X still closes setup
+    GetDlgItem $FinishBtn $HWNDPARENT 1
+    EnableWindow $FinishBtn 0
+    StrCpy $Countdown 10
+    SendMessage $FinishBtn ${WM_SETTEXT} 0 "STR:Finish ($Countdown)"
+    ${NSD_CreateTimer} CountdownTick 1000
+  ${EndIf}
+FunctionEnd
+
+Function CountdownTick
+  IntOp $Countdown $Countdown - 1
+  ${If} $Countdown <= 0
+    ${NSD_KillTimer} CountdownTick
+    EnableWindow $FinishBtn 1
+    SendMessage $FinishBtn ${WM_SETTEXT} 0 "STR:Finish"
+  ${Else}
+    SendMessage $FinishBtn ${WM_SETTEXT} 0 "STR:Finish ($Countdown)"
+  ${EndIf}
+FunctionEnd
+
 Section "Install"
+  InitPluginsDir
   SetOutPath "$INSTDIR"
   ; Remove a previous install cleanly (ignore failures)
   IfFileExists "$INSTDIR\${BRAND}.exe" 0 +4
@@ -123,16 +152,23 @@ Section "Install"
     FileWrite $2 "$SetupKey"
     FileClose $2
     ${If} $MgmtUrl != ""
-      nsExec::ExecToLog '"$INSTDIR\${BRAND}.exe" up --setup-key-file "$PLUGINSDIR\key.txt" --management-url "$MgmtUrl"'
+      nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" up --setup-key-file "$PLUGINSDIR\key.txt" --management-url "$MgmtUrl"'
     ${Else}
-      nsExec::ExecToLog '"$INSTDIR\${BRAND}.exe" up --setup-key-file "$PLUGINSDIR\key.txt"'
+      nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" up --setup-key-file "$PLUGINSDIR\key.txt"'
     ${EndIf}
     Pop $0
+    Pop $1
     Delete "$PLUGINSDIR\key.txt"
-    ${If} $0 != 0
-      MessageBox MB_OK|MB_ICONEXCLAMATION "Installed, but connecting failed (code $0). Check the key and run:$\r$\n${BRAND} up --setup-key <KEY>" /SD IDOK
+    ${If} $0 == 0
+      ; $1 holds: Connected / DNS domain: ... / IP address: ...
+      StrCpy $FinishMsg "${DISPLAY} is installed and connected.$\r$\n$\r$\n$1$\r$\n$\r$\nNote these down, then click Finish when it becomes available."
+    ${Else}
+      StrCpy $FinishMsg "${DISPLAY} is installed, but connecting failed (code $0).$\r$\n$\r$\n$1$\r$\n$\r$\nCheck the key, then run:$\r$\n${BRAND} up --setup-key <KEY>"
       SetErrorLevel 4
     ${EndIf}
+  ${EndIf}
+  ${If} $SetupKey == ""
+    StrCpy $FinishMsg "${DISPLAY} is installed and running, but not connected yet.$\r$\n$\r$\nConnect with:$\r$\n${BRAND} up --setup-key <KEY>$\r$\n$\r$\nIt will then show the DNS domain and IP address assigned to this PC."
   ${EndIf}
 SectionEnd
 

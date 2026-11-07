@@ -2,7 +2,7 @@ name: build
 on:
   push:
     tags: ['v*']
-    branches: ['claude/headless-softether-client-s13nn0']
+    branches: ['main', 'claude/headless-softether-client-s13nn0']
     paths-ignore: ['bin/**', '**.md']
   workflow_dispatch:
 permissions:

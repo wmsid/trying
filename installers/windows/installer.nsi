@@ -1,6 +1,6 @@
 ; Windows setup program. Build with:
 ;   makensis -DBRAND=slbzt -DDISPLAY=SLBZT -DVERSION=1.0.0 -DARCH=x64 -DEXE=path\slbzt.exe -DWINTUN=path\wintun.dll -DPATHTOOL=path\pathtool.ps1 -DOUT=setup.exe installer.nsi
-; Silent install:  setup.exe /S /SETUPKEY=abcd        (optional: /MGMT=https://other-server:443)
+; Silent install:  setup.exe /S /SETUPKEY=abcd        (the key is REQUIRED; optional: /MGMT=https://other-server:443)
 ; Silent uninstall: "%ProgramFiles%\slbzt\uninstall.exe" /S
 Unicode true
 !include MUI2.nsh
@@ -55,16 +55,23 @@ Function .onInit
   ${GetParameters} $R0
   ${GetOptions} $R0 "/SETUPKEY=" $SetupKey
   ${GetOptions} $R0 "/MGMT=" $MgmtUrl
+  ${If} ${Silent}
+    StrLen $0 $SetupKey
+    ${If} $0 < 8
+      SetErrorLevel 5          ; setup key is mandatory: /S /SETUPKEY=<key>
+      Abort
+    ${EndIf}
+  ${EndIf}
 FunctionEnd
 
 Function KeyPageCreate
   ${If} ${Silent}
     Abort
   ${EndIf}
-  !insertmacro MUI_HEADER_TEXT "Connect" "Enter the setup key you were given (optional)."
+  !insertmacro MUI_HEADER_TEXT "Connect" "A setup key is required to install."
   nsDialogs::Create 1018
   Pop $0
-  ${NSD_CreateLabel} 0 0 100% 24u "Paste your setup key to connect this computer now. Leave empty to connect later with:$\r$\n${BRAND} up --setup-key <KEY>"
+  ${NSD_CreateLabel} 0 0 100% 24u "Paste the setup key you were given. Setup cannot continue without it, and it is used to connect this computer."
   Pop $0
   ${NSD_CreateText} 0 36u 100% 12u "$SetupKey"
   Pop $KeyBox
@@ -73,6 +80,11 @@ FunctionEnd
 
 Function KeyPageLeave
   ${NSD_GetText} $KeyBox $SetupKey
+  StrLen $0 $SetupKey
+  ${If} $0 < 8
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Please enter your setup key to continue."
+    Abort                      ; stay on this page
+  ${EndIf}
 FunctionEnd
 
 Function FinishShow
@@ -164,9 +176,6 @@ Section "Install"
       StrCpy $FinishMsg "${DISPLAY} is installed, but connecting failed (code $0).$\r$\n$\r$\n$1$\r$\n$\r$\nCheck the key, then run:$\r$\n${BRAND} up --setup-key <KEY>"
       SetErrorLevel 4
     ${EndIf}
-  ${EndIf}
-  ${If} $SetupKey == ""
-    StrCpy $FinishMsg "${DISPLAY} is installed and running, but not connected yet.$\r$\n$\r$\nConnect with:$\r$\n${BRAND} up --setup-key <KEY>$\r$\n$\r$\nIt will then show the DNS domain and IP address assigned to this PC."
   ${EndIf}
 SectionEnd
 

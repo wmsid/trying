@@ -1,5 +1,5 @@
 ; Windows setup program. Build with:
-;   makensis -DBRAND=slbzt -DDISPLAY=SLBZT -DVERSION=1.0.0 -DARCH=x64 -DEXE=path\slbzt.exe -DWINTUN=path\wintun.dll -DPATHTOOL=path\pathtool.ps1 -DOUT=setup.exe installer.nsi
+;   makensis -DBRAND=slbzt -DDISPLAY=SLBZT -DVERSION=1.0.0 -DARCH=x64 -DEXE=path\slbzt.exe -DWINTUN=path\wintun.dll -DOUT=setup.exe installer.nsi
 ; Silent install:  setup.exe /S /SETUPKEY=abcd        (the key is REQUIRED; optional: /MGMT=https://other-server:443)
 ; Silent uninstall: "%ProgramFiles%\slbzt\uninstall.exe" /S
 Unicode true
@@ -184,9 +184,6 @@ Section "Install"
   File "/oname=wintun.dll" "${WINTUN}"
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
-  ; Setup does NOT touch PATH. The helper below is only used by the uninstaller to remove an entry that
-  ; an earlier version of this setup may have added.
-  File "/oname=$INSTDIR\pathtool.ps1" "${PATHTOOL}"
 
   ; Add/Remove Programs
   WriteRegStr HKLM "Software\${BRAND}" "InstallDir" "$INSTDIR"
@@ -278,16 +275,11 @@ Section "Uninstall"
   nsExec::Exec '"$INSTDIR\${BRAND}.exe" service stop'
   nsExec::Exec '"$INSTDIR\${BRAND}.exe" service uninstall'
   Sleep 1000
-  ; remove our folder from the machine PATH if an earlier setup added it (does nothing if it is not there)
-  nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\pathtool.ps1" -Action remove -Dir "$INSTDIR"'
-  Pop $0
-  SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
   ; leftovers the service may not have removed (exact names only)
   !insertmacro CleanOwnRules "SYSTEM\CurrentControlSet\Services\Dnscache\Parameters\DnsPolicyConfig" local
   !insertmacro CleanOwnRules "SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\DnsPolicyConfig" gpo
   nsExec::Exec '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="${DISPLAY}"'
   nsExec::Exec '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="${DISPLAY}-v6"'
-  Delete "$INSTDIR\pathtool.ps1"
   Delete "$INSTDIR\${BRAND}.exe"
   Delete "$INSTDIR\wintun.dll"
   Delete "$INSTDIR\uninstall.exe"

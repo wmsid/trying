@@ -1,5 +1,5 @@
 ; Windows setup program. Build with:
-;   makensis -DBRAND=slbzt -DDISPLAY=SLBZT -DVERSION=1.0.0 -DARCH=x64 -DEXE=path\slbzt.exe -DWINTUN=path\wintun.dll -DOUT=setup.exe installer.nsi
+;   makensis -DBRAND=slbzt -DDISPLAY=SLBZT -DVERSION=1.0.0 -DARCH=x64 -DEXE=path\slbzt.exe -DWINTUN=path\wintun.dll -DPATHTOOL=path\pathtool.ps1 -DOUT=setup.exe installer.nsi
 ; Silent install:  setup.exe /S /SETUPKEY=abcd        (optional: /MGMT=https://other-server:443)
 ; Silent uninstall: "%ProgramFiles%\slbzt\uninstall.exe" /S
 Unicode true
@@ -7,9 +7,7 @@ Unicode true
 !include nsDialogs.nsh
 !include LogicLib.nsh
 !include FileFunc.nsh
-!include StrFunc.nsh
 !include WordFunc.nsh
-${StrLoc}
 !insertmacro WordReplace
 !insertmacro un.WordReplace
 
@@ -112,13 +110,13 @@ Section "Install"
   File "/oname=wintun.dll" "${WINTUN}"
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
-  ; PATH (machine-wide), only if missing
-  ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-  ${StrLoc} $1 "$0;" "$INSTDIR;" ">"
-  ${If} $1 == ""
-    WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$0;$INSTDIR"
-    SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
-  ${EndIf}
+  ; PATH (machine-wide). Done by a PowerShell helper because NSIS strings are capped at 1024
+  ; chars and would truncate a long PATH. The helper backs up the old PATH and fails safe.
+  SetShellVarContext all
+  File "/oname=$INSTDIR\pathtool.ps1" "${PATHTOOL}"
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\pathtool.ps1" -Action add -Dir "$INSTDIR" -BackupDir "$APPDATA\${DISPLAY}"'
+  Pop $0
+  SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
 
   ; Add/Remove Programs
   WriteRegStr HKLM "Software\${BRAND}" "InstallDir" "$INSTDIR"
@@ -180,16 +178,17 @@ Section "Uninstall"
   nsExec::Exec '"$INSTDIR\${BRAND}.exe" service stop'
   nsExec::Exec '"$INSTDIR\${BRAND}.exe" service uninstall'
   Sleep 1000
+  ; take our folder off the machine PATH first (uses the helper that setup installed)
+  nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\pathtool.ps1" -Action remove -Dir "$INSTDIR"'
+  Pop $0
+  SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+  Delete "$INSTDIR\pathtool.ps1"
   Delete "$INSTDIR\${BRAND}.exe"
   Delete "$INSTDIR\wintun.dll"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"
   SetShellVarContext all
   RMDir /r "$APPDATA\${DISPLAY}"   ; %ProgramData%\<name> (config, logs)
-  ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
-  ${un.WordReplace} "$0" ";$INSTDIR" "" "+*" $1
-  WriteRegExpandStr HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path" "$1"
-  SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${BRAND}"
   DeleteRegKey HKLM "Software\${BRAND}"
 SectionEnd

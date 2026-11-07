@@ -45,6 +45,20 @@ grep -rl 'https://docs.netbird.io' client --include=*.go | xargs -r sed -i 's#ht
 
 sed -i 's/non-netbird\.io domains/non-internal domains/' client/cmd/root.go
 
+# Safety: this fork must NEVER download or run NetBird's installers/updates, nor phone home.
+# 1) auto-update is unsupported on every OS (a management-server "update to X" then only
+#    produces an informational event); 2) every upstream download/version URL is neutralised.
+for f in client/internal/updater/supported_windows.go client/internal/updater/supported_darwin.go; do
+  perl -0pi -e 's/func isAutoUpdateSupported\(\) bool \{/func isAutoUpdateSupported() bool {\n\tif true {\n\t\treturn false\n\t}/' "$f"
+  grep -q 'return false' "$f" || { echo "updater patch failed: $f"; exit 1; }
+done
+sed -i 's#https://pkgs.netbird.io/releases/latest/version#http://127.0.0.1:1/disabled#' version/update.go
+sed -i 's#https://github.com/netbirdio/netbird/releases/download/[^"`]*#http://127.0.0.1:1/disabled#' \
+  client/internal/updater/installer/installer_run_windows.go client/internal/updater/installer/installer_run_darwin.go
+grep -rl 'upload.debug.netbird.io' client util shared upload-server --include=*.go 2>/dev/null | grep -v _test | xargs -r sed -i 's#https://upload.debug.netbird.io#http://127.0.0.1:1/disabled#g'
+# Windows named kernel object shared with stock NetBird -> make it ours
+sed -i "s#Global\\\\NetbirdDebugTriggerEvent#Global\\\\${DISPLAY_NAME}DebugTriggerEvent#g" client/cmd/debug_windows.go
+
 # Coexistence: separate WireGuard interface name and listen port
 sed -i "s#\"wt0\"#\"${WG_IFACE}\"#" client/iface/configurer/name.go
 sed -i "s#\"utun100\"#\"${WG_IFACE_DARWIN}\"#" client/iface/configurer/name_darwin.go

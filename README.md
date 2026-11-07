@@ -42,6 +42,15 @@ network range vs NetBird's default 100.64.0.0/10) and not push conflicting DNS/r
 - Built with `CGO_ENABLED=0`; cross-compiled, so macOS/Windows runtime behavior was **not** tested here.
 - The rebrand patch is regex-based; when bumping `NETBIRD_VERSION`, check the build output for `WARN: leftover brand strings`.
 
+## Windows installer (.exe)
+`*_windows_*_setup.exe` / `*_windows7_*_setup.exe` are real setup programs (admin prompt, installs to Program Files,
+adds to PATH, registers the service, shows in Add/Remove Programs, includes an uninstaller).
+Double-click: the wizard has an optional "setup key" box. Silent / scripted:
+`slbzt_..._setup.exe /S /SETUPKEY=abcd` (optional `/MGMT=https://other:443`).
+Uninstall: Settings > Apps, or `"%ProgramFiles%\slbzt\uninstall.exe" /S`.
+The `.zip` still contains `install.ps1`; if PowerShell blocks it, use
+`powershell -ExecutionPolicy Bypass -File .\install.ps1`.
+
 ## Linux
 `*_linux_{amd64,arm64,arm,386}.tar.gz`: `tar xzf ...; cd ...; sudo ./install.sh [SETUP_KEY]` installs a systemd
 (or init) service via `slbzt service install`. Static binaries (no libc dependency).

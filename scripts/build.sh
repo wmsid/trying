@@ -16,7 +16,12 @@ pack() { # pack <os> <arch> <label> <gobin>
   echo ">> $label/$arch"
   GOOS=$os GOARCH=$arch "$gobin" build -ldflags "$LDF" -o "$out/${BRAND_NAME}${ext}" ./client
   cp "$ROOT/brand.env" "$out/brand.env"
-  if [ "$os" = windows ]; then cp "$ROOT"/installers/windows/*.ps1 "$out/"; (cd "$DIST" && zip -qr "$pkg.zip" "$pkg")
+  if [ "$os" = windows ]; then
+    cp "$ROOT"/installers/windows/*.ps1 "$out/"
+    local narch=x64; [ "$arch" = arm64 ] && narch=arm64; [ "$arch" = 386 ] && narch=x86
+    makensis -V1 -DBRAND="$BRAND_NAME" -DDISPLAY="$BRAND_DISPLAY" -DVERSION="$BUILD_VERSION" -DARCH="$narch" \
+      -DEXE="$out/${BRAND_NAME}.exe" -DOUT="$DIST/${pkg}_setup.exe" "$ROOT/installers/windows/installer.nsi"
+    (cd "$DIST" && zip -qr "$pkg.zip" "$pkg")
   else cp "$ROOT"/installers/$([ "$os" = linux ] && echo linux || echo macos)/*.sh "$out/"; chmod +x "$out"/*.sh; tar -C "$DIST" -czf "$DIST/$pkg.tar.gz" "$pkg"; fi
   rm -rf "$out"
 }

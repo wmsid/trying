@@ -32,7 +32,7 @@ pack() { # pack <os> <arch> <label> <gobin>
     [ "$arch" = 386 ] && { narch=x86; wdir=x86; }
     cp "$WORK/wintun/bin/$wdir/wintun.dll" "$out/wintun.dll"
     makensis -V1 -DBRAND="$BRAND_NAME" -DDISPLAY="$BRAND_DISPLAY" -DVERSION="$BUILD_VERSION" -DARCH="$narch" \
-      -DEXE="$out/${BRAND_NAME}.exe" -DWINTUN="$out/wintun.dll" -DPATHTOOL="$ROOT/installers/windows/pathtool.ps1" -DOUT="$DIST/${pkg}_setup.exe" "$ROOT/installers/windows/installer.nsi"
+      -DEXE="$out/${BRAND_NAME}.exe" -DWINTUN="$out/wintun.dll" -DOUT="$DIST/${pkg}_setup.exe" "$ROOT/installers/windows/installer.nsi"
     (cd "$DIST" && zip -qr "$pkg.zip" "$pkg")
   else cp "$ROOT"/installers/$([ "$os" = linux ] && echo linux || echo macos)/*.sh "$out/"; chmod +x "$out"/*.sh; tar -C "$DIST" -czf "$DIST/$pkg.tar.gz" "$pkg"; fi
   rm -rf "$out"

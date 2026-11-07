@@ -47,6 +47,8 @@ Var MgmtUrl
 Var FinishMsg
 Var FinishBtn
 Var Countdown
+Var ResultBox
+Var CopyBtn
 
 Function .onInit
   !if "${ARCH}" != "x86"
@@ -89,7 +91,13 @@ FunctionEnd
 
 Function FinishShow
   ${If} $FinishMsg != ""
-    ${NSD_SetText} $mui.FinishPage.Text "$FinishMsg"
+    ; replace the static label with a read-only text box (selectable) plus a Copy button
+    ShowWindow $mui.FinishPage.Text ${SW_HIDE}
+    nsDialogs::CreateControl EDIT "${DEFAULT_STYLES}|${WS_TABSTOP}|${WS_VSCROLL}|${ES_MULTILINE}|${ES_READONLY}" "${WS_EX_CLIENTEDGE}" 120u 45u 195u 90u "$FinishMsg"
+    Pop $ResultBox
+    ${NSD_CreateButton} 120u 140u 70u 14u "Copy"
+    Pop $CopyBtn
+    ${NSD_OnClick} $CopyBtn CopyResult
     ; keep Finish disabled for 10 s so the result is not clicked past; the window X still closes setup
     GetDlgItem $FinishBtn $HWNDPARENT 1
     EnableWindow $FinishBtn 0
@@ -97,6 +105,12 @@ Function FinishShow
     SendMessage $FinishBtn ${WM_SETTEXT} 0 "STR:Finish ($Countdown)"
     ${NSD_CreateTimer} CountdownTick 1000
   ${EndIf}
+FunctionEnd
+
+Function CopyResult
+  SendMessage $ResultBox ${EM_SETSEL} 0 -1
+  SendMessage $ResultBox ${WM_COPY} 0 0
+  SendMessage $CopyBtn ${WM_SETTEXT} 0 "STR:Copied"
 FunctionEnd
 
 Function CountdownTick
@@ -171,7 +185,7 @@ Section "Install"
     Delete "$PLUGINSDIR\key.txt"
     ${If} $0 == 0
       ; $1 holds: Connected / DNS domain: ... / IP address: ...
-      StrCpy $FinishMsg "${DISPLAY} is installed and connected.$\r$\n$\r$\n$1$\r$\n$\r$\nNote these down, then click Finish when it becomes available."
+      StrCpy $FinishMsg "${DISPLAY} is installed and connected.$\r$\n$\r$\n$1$\r$\n$\r$\nSelect any text to copy it, or press Copy. Finish becomes available shortly."
     ${Else}
       StrCpy $FinishMsg "${DISPLAY} is installed, but connecting failed (code $0).$\r$\n$\r$\n$1$\r$\n$\r$\nCheck the key, then run:$\r$\n${BRAND} up --setup-key <KEY>"
       SetErrorLevel 4

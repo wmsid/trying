@@ -20,6 +20,10 @@ pack() { # pack <os> <arch> <label> <gobin>
   local pkg="${BRAND_NAME}_${BUILD_VERSION}_${label}_${arch}"; local out="$DIST/$pkg"; mkdir -p "$out"
   echo ">> $label/$arch"
   GOOS=$os GOARCH=$arch "$gobin" build -ldflags "$LDF" -o "$out/${BRAND_NAME}${ext}" ./client
+  for bad in 'pkgs.netbird.io' 'github.com/netbirdio/netbird/releases' 'ingest.netbird.io' 'publickeys.netbird.io' \
+             'NetbirdDebugTriggerEvent' 'f2f29e61-d91f-4d76-8151-119b20c4bdeb' 'api.netbird.io' 'app.netbird.io' 'upload.debug.netbird.io'; do
+    if grep -aqF "$bad" "$out/${BRAND_NAME}${ext}"; then echo "FATAL: binary still contains upstream string: $bad"; exit 1; fi
+  done
   cp "$ROOT/brand.env" "$out/brand.env"
   if [ "$os" = windows ]; then
     cp "$ROOT"/installers/windows/*.ps1 "$out/"

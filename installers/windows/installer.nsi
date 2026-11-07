@@ -11,6 +11,12 @@ Unicode true
 !insertmacro WordReplace
 !insertmacro un.WordReplace
 
+!if "${DISPLAY}" == ""
+  !error "DISPLAY must not be empty"
+!endif
+!if "${BRAND}" == ""
+  !error "BRAND must not be empty"
+!endif
 Name "${DISPLAY}"
 OutFile "${OUT}"
 RequestExecutionLevel admin
@@ -49,6 +55,7 @@ Var FinishBtn
 Var Countdown
 Var ResultBox
 Var CopyBtn
+Var PathNote
 
 Function .onInit
   !if "${ARCH}" != "x86"
@@ -124,6 +131,25 @@ Function CountdownTick
   ${EndIf}
 FunctionEnd
 
+; Deletes only sub-keys whose name starts with "<DISPLAY>-" (the client's own NRPT rules), in case
+; the service died without cleaning up and left a DNS rule pointing at a resolver that no longer exists.
+!macro CleanOwnRules ROOT ID
+  StrCpy $3 0
+  StrLen $6 "${DISPLAY}-"
+  loop_${ID}:
+    EnumRegKey $4 HKLM "${ROOT}" $3
+    StrCmp $4 "" done_${ID}
+    StrCpy $5 $4 $6
+    StrCmp $5 "${DISPLAY}-" del_${ID} skip_${ID}
+    del_${ID}:
+      DeleteRegKey HKLM "${ROOT}\$4"
+      Goto loop_${ID}
+    skip_${ID}:
+      IntOp $3 $3 + 1
+      Goto loop_${ID}
+  done_${ID}:
+!macroend
+
 Section "Install"
   InitPluginsDir
   SetOutPath "$INSTDIR"
@@ -142,6 +168,9 @@ Section "Install"
   File "/oname=$INSTDIR\pathtool.ps1" "${PATHTOOL}"
   nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\pathtool.ps1" -Action add -Dir "$INSTDIR" -BackupDir "$APPDATA\${DISPLAY}"'
   Pop $0
+  ${If} $0 != 0
+    StrCpy $PathNote "$\r$\n$\r$\nNote: ${DISPLAY} could not be added to PATH (your PATH was left unchanged). Run it as:$\r$\n$\"$INSTDIR\${BRAND}.exe$\" status"
+  ${EndIf}
   SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
 
   ; Add/Remove Programs
@@ -185,9 +214,9 @@ Section "Install"
     Delete "$PLUGINSDIR\key.txt"
     ${If} $0 == 0
       ; $1 holds: Connected / DNS domain: ... / IP address: ...
-      StrCpy $FinishMsg "${DISPLAY} is installed and connected.$\r$\n$\r$\n$1$\r$\n$\r$\nSelect any text to copy it, or press Copy. Finish becomes available shortly."
+      StrCpy $FinishMsg "${DISPLAY} is installed and connected.$\r$\n$\r$\n$1$\r$\n$\r$\nSelect any text to copy it, or press Copy. Finish becomes available shortly.$PathNote"
     ${Else}
-      StrCpy $FinishMsg "${DISPLAY} is installed, but connecting failed (code $0).$\r$\n$\r$\n$1$\r$\n$\r$\nCheck the key, then run:$\r$\n${BRAND} up --setup-key <KEY>"
+      StrCpy $FinishMsg "${DISPLAY} is installed, but connecting failed (code $0).$\r$\n$\r$\n$1$\r$\n$\r$\nCheck the key, then run:$\r$\n${BRAND} up --setup-key <KEY>$PathNote"
       SetErrorLevel 4
     ${EndIf}
   ${EndIf}
@@ -205,6 +234,11 @@ Section "Uninstall"
   nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\pathtool.ps1" -Action remove -Dir "$INSTDIR"'
   Pop $0
   SendMessage ${HWND_BROADCAST} ${WM_WININICHANGE} 0 "STR:Environment" /TIMEOUT=5000
+  ; leftovers the service may not have removed (exact names only)
+  !insertmacro CleanOwnRules "SYSTEM\CurrentControlSet\Services\Dnscache\Parameters\DnsPolicyConfig" local
+  !insertmacro CleanOwnRules "SOFTWARE\Policies\Microsoft\Windows NT\DNSClient\DnsPolicyConfig" gpo
+  nsExec::Exec '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="${DISPLAY}"'
+  nsExec::Exec '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="${DISPLAY}-v6"'
   Delete "$INSTDIR\pathtool.ps1"
   Delete "$INSTDIR\${BRAND}.exe"
   Delete "$INSTDIR\wintun.dll"

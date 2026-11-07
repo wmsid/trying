@@ -11,11 +11,11 @@ import (
 	"github.com/netbirdio/netbird/client/proto"
 )
 
-// printConnectionSummary prints, after "Connected", the DNS domain received
-// from the management server and the IP address assigned to this peer.
+// printConnectionSummary prints, after "Connected", this machine's full DNS name
+// as assigned by the management server (e.g. sidj.zt.slb) and its assigned IP address.
 // The daemon may need a moment to publish them, so poll briefly.
 func printConnectionSummary(ctx context.Context, cmd *cobra.Command, client proto.DaemonServiceClient) {
-	var ip, domain string
+	var ip, fqdn string
 	for i := 0; i < 20; i++ {
 		resp, err := client.Status(ctx, &proto.StatusRequest{GetFullPeerStatus: true})
 		if err == nil {
@@ -25,21 +25,19 @@ func printConnectionSummary(ctx context.Context, cmd *cobra.Command, client prot
 			} else if a := net.ParseIP(lp.GetIP()); a != nil {
 				ip = a.String()
 			}
-			if _, rest, ok := strings.Cut(lp.GetFqdn(), "."); ok {
-				domain = rest
-			}
-			if ip != "" && domain != "" {
+			fqdn = strings.TrimSuffix(lp.GetFqdn(), ".")
+			if ip != "" && fqdn != "" {
 				break
 			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	if domain == "" {
-		domain = "(none)"
+	if fqdn == "" {
+		fqdn = "(none)"
 	}
 	if ip == "" {
 		ip = "(pending)"
 	}
-	cmd.Printf("DNS domain: %s\n", domain)
+	cmd.Printf("DNS domain: %s\n", fqdn)
 	cmd.Printf("IP address: %s\n", ip)
 }

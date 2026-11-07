@@ -24,6 +24,17 @@ perl -i -pe '
   s{(?<![\w])Net[Bb]ird(?![\w])(?!\.io)}{$ENV{DISPLAY_NAME}}g;
 ' "${FILES[@]}"
 
+# `up` prints the received DNS domain and assigned IP after "Connected"
+cp "$ROOT/patches/up_summary.go" client/cmd/up_summary.go
+python3 - <<'PY'
+p = "client/cmd/up.go"
+s = open(p).read()
+old = '\tcmd.Println("Connected")\n\treturn nil\n}\n\nfunc doDaemonUp'
+assert s.count(old) == 1, "up.go patch anchor not found"
+s = s.replace(old, '\tcmd.Println("Connected")\n\tprintConnectionSummary(ctx, cmd, client)\n\treturn nil\n}\n\nfunc doDaemonUp')
+open(p, "w").write(s)
+PY
+
 # Default management URL; remove every remaining upstream endpoint.
 sed -i "s#https://api.netbird.io:443#${MGMT_URL}#" client/internal/profilemanager/config.go
 sed -i 's#https://app.netbird.io:443#'"${MGMT_URL}"'#' client/internal/profilemanager/config.go

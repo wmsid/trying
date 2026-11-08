@@ -217,9 +217,9 @@ Section "Install"
     FileWrite $2 "$SetupKey"
     FileClose $2
     ${If} $MgmtUrl != ""
-      nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" up --setup-key-file "$PLUGINSDIR\key.txt" --management-url "$MgmtUrl"'
+      nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" up --setup-key-file "$PLUGINSDIR\key.txt" --print-summary --management-url "$MgmtUrl"'
     ${Else}
-      nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" up --setup-key-file "$PLUGINSDIR\key.txt"'
+      nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" up --setup-key-file "$PLUGINSDIR\key.txt" --print-summary'
     ${EndIf}
     Pop $0
     Pop $1

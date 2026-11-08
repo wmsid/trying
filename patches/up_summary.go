@@ -11,6 +11,14 @@ import (
 	"github.com/netbirdio/netbird/client/proto"
 )
 
+// printSummaryFlag is set by the Windows setup program only. A plain `up` prints just "Connected".
+var printSummaryFlag bool
+
+func init() {
+	upCmd.PersistentFlags().BoolVar(&printSummaryFlag, "print-summary", false, "print this machine's DNS name and IP address after connecting (used by the setup program)")
+	_ = upCmd.PersistentFlags().MarkHidden("print-summary")
+}
+
 // printConnectionSummary prints, after "Connected", this machine's full DNS name
 // as assigned by the management server (e.g. sidj.zt.slb) and its assigned IP address.
 // The daemon may need a moment to publish them, so poll briefly.

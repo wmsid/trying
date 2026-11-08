@@ -24,14 +24,17 @@ perl -i -pe '
   s{(?<![\w])Net[Bb]ird(?![\w])(?!\.io)}{$ENV{DISPLAY_NAME}}g;
 ' "${FILES[@]}"
 
-# `up` prints the received DNS domain and assigned IP after "Connected"
+# `up --print-summary` (hidden; used by the Windows setup) prints the DNS name and IP; plain `up` is unchanged
 cp "$ROOT/patches/up_summary.go" client/cmd/up_summary.go
 python3 - <<'PY'
 p = "client/cmd/up.go"
 s = open(p).read()
 old = '\tcmd.Println("Connected")\n\treturn nil\n}\n\nfunc doDaemonUp'
 assert s.count(old) == 1, "up.go patch anchor not found"
-s = s.replace(old, '\tcmd.Println("Connected")\n\tprintConnectionSummary(ctx, cmd, client)\n\treturn nil\n}\n\nfunc doDaemonUp')
+s = s.replace(old, '\tcmd.Println("Connected")\n\tif printSummaryFlag {\n\t\tprintConnectionSummary(ctx, cmd, client)\n\t}\n\treturn nil\n}\n\nfunc doDaemonUp')
+old2 = '\t\t\tcmd.Println("Already connected")\n\t\t\treturn nil'
+assert s.count(old2) == 1, "up.go already-connected anchor not found"
+s = s.replace(old2, '\t\t\tcmd.Println("Already connected")\n\t\t\tif printSummaryFlag {\n\t\t\t\tprintConnectionSummary(ctx, cmd, client)\n\t\t\t}\n\t\t\treturn nil')
 open(p, "w").write(s)
 PY
 

@@ -172,6 +172,24 @@ FunctionEnd
   done_${ID}:
 !macroend
 
+; Removes trailing CR, LF and spaces from the string on the stack top.
+Function TrimEnd
+  Exch $R0
+  Push $R1
+  trim_loop:
+    StrCpy $R1 $R0 1 -1
+    StrCmp $R1 "$\r" trim_cut
+    StrCmp $R1 "$\n" trim_cut
+    StrCmp $R1 " " trim_cut
+    Goto trim_done
+  trim_cut:
+    StrCpy $R0 $R0 -1
+    Goto trim_loop
+  trim_done:
+  Pop $R1
+  Exch $R0
+FunctionEnd
+
 Section "Install"
   InitPluginsDir
   SetOutPath "$INSTDIR"
@@ -217,9 +235,9 @@ Section "Install"
     FileWrite $2 "$SetupKey"
     FileClose $2
     ${If} $MgmtUrl != ""
-      nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" up --setup-key-file "$PLUGINSDIR\key.txt" --print-summary --management-url "$MgmtUrl"'
+      nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" up --setup-key-file "$PLUGINSDIR\key.txt" --management-url "$MgmtUrl"'
     ${Else}
-      nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" up --setup-key-file "$PLUGINSDIR\key.txt" --print-summary'
+      nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" up --setup-key-file "$PLUGINSDIR\key.txt"'
     ${EndIf}
     Pop $0
     Pop $1
@@ -228,24 +246,58 @@ Section "Install"
       StrCpy $Connected 1
       StrCpy $DnsName ""
       StrCpy $IpAddr ""
-      StrCpy $R2 1
-      parse_loop:
-        ClearErrors
-        ${WordFind} "$1" "$\n" "+$R2" $R3
-        IfErrors parse_done
-        StrCpy $R4 $R3 1 -1
-        StrCmp $R4 "$\r" 0 +2
-          StrCpy $R3 $R3 -1
-        StrCpy $R4 $R3 12
-        StrCmp $R4 "DNS domain: " 0 +3
-          StrCpy $DnsName $R3 "" 12
-          Goto next_line
-        StrCmp $R4 "IP address: " 0 next_line
-          StrCpy $IpAddr $R3 "" 12
-        next_line:
-        IntOp $R2 $R2 + 1
-        Goto parse_loop
-      parse_done:
+      ; The name/IP can take a few seconds to appear after "up": ask the client's own `status` command
+      ; (up to ~15 tries). `status --ipv4` prints just the IP; plain `status` has a "FQDN: <name>" line.
+      StrCpy $R5 0
+      poll_loop:
+        ${If} $IpAddr == ""
+          nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" status --ipv4'
+          Pop $R6
+          Pop $R7
+          ${If} $R6 == 0
+            Push $R7
+            Call TrimEnd
+            Pop $R7
+            StrLen $R8 $R7
+            ${If} $R8 >= 7
+            ${AndIf} $R8 <= 15
+              StrCpy $IpAddr $R7        ; the "no connection yet" help text is far longer than an IPv4 address
+            ${EndIf}
+          ${EndIf}
+        ${EndIf}
+        ${If} $DnsName == ""
+          nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" status'
+          Pop $R6
+          Pop $R7
+          ${If} $R6 == 0
+            StrCpy $R2 1
+            line_loop:
+              ClearErrors
+              ${WordFind} "$R7" "$\n" "+$R2" $R3
+              IfErrors line_done
+              Push $R3
+              Call TrimEnd
+              Pop $R3
+              StrCpy $R4 $R3 6
+              StrCmp $R4 "FQDN: " 0 next_line
+                StrCpy $DnsName $R3 "" 6
+                Goto line_done
+              next_line:
+              IntOp $R2 $R2 + 1
+              Goto line_loop
+            line_done:
+          ${EndIf}
+        ${EndIf}
+        ${If} $IpAddr != ""
+        ${AndIf} $DnsName != ""
+          Goto poll_done
+        ${EndIf}
+        IntOp $R5 $R5 + 1
+        ${If} $R5 < 15
+          Sleep 1000
+          Goto poll_loop
+        ${EndIf}
+      poll_done:
       ${If} $DnsName == ""
         StrCpy $DnsName "(not reported)"
       ${EndIf}

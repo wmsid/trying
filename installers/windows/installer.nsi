@@ -107,8 +107,10 @@ Function FinishShow
     ${If} $Connected == 1
       ${NSD_CreateLabel} 120u 45u 195u 14u "${DISPLAY} is installed and connected."
       Pop $0
+      SetCtlColors $0 "" transparent
       ${NSD_CreateLabel} 120u 64u 195u 10u "DNS name:"
       Pop $0
+      SetCtlColors $0 "" transparent
       ; read-only single-line boxes: selectable with the mouse / Ctrl+C
       nsDialogs::CreateControl EDIT "${DEFAULT_STYLES}|${WS_TABSTOP}|${ES_AUTOHSCROLL}|${ES_READONLY}" "${WS_EX_CLIENTEDGE}" 120u 75u 140u 13u "$DnsName"
       Pop $DnsBox
@@ -117,10 +119,12 @@ Function FinishShow
       ${NSD_OnClick} $CopyBtn CopyResult
       ${NSD_CreateLabel} 120u 96u 195u 10u "IP address:"
       Pop $0
+      SetCtlColors $0 "" transparent
       nsDialogs::CreateControl EDIT "${DEFAULT_STYLES}|${WS_TABSTOP}|${ES_AUTOHSCROLL}|${ES_READONLY}" "${WS_EX_CLIENTEDGE}" 120u 107u 140u 13u "$IpAddr"
       Pop $IpBox
       ${NSD_CreateLabel} 120u 128u 195u 34u "Press Copy to copy the DNS name, or select any text above. Finish becomes available shortly."
       Pop $0
+      SetCtlColors $0 "" transparent
     ${Else}
       ; failure / other message: one read-only multi-line box
       nsDialogs::CreateControl EDIT "${DEFAULT_STYLES}|${WS_TABSTOP}|${WS_VSCROLL}|${ES_MULTILINE}|${ES_READONLY}" "${WS_EX_CLIENTEDGE}" 120u 45u 195u 110u "$FinishMsg"
@@ -273,8 +277,9 @@ Section "Install"
             StrCpy $R2 1
             line_loop:
               ClearErrors
-              ${WordFind} "$R7" "$\n" "+$R2" $R3
+              ${WordFind} "$R7" "$\n" "E+$R2" $R3
               IfErrors line_done
+              IntCmp $R2 60 line_done 0 line_done   ; hard cap: can never loop forever
               Push $R3
               Call TrimEnd
               Pop $R3

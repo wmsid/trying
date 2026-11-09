@@ -1,0 +1,37 @@
+--- a/chrome/browser/process_singleton_win.cc
++++ b/chrome/browser/process_singleton_win.cc
+@@ -21,6 +21,7 @@
+ #include "base/strings/escape.h"
+ #include "base/strings/string_number_conversions.h"
+ #include "base/strings/utf_string_conversions.h"
++#include "base/strings/stringprintf.h"
+ #include "base/time/time.h"
+ #include "base/timer/elapsed_timer.h"
+ #include "base/trace_event/trace_event.h"
+@@ -47,6 +48,17 @@
+ 
+ const char kLockfile[] = "lockfile";
+ 
++// Multi-session: the cross-machine lockfile name gets the Windows session id
++// appended, so one Chrome per RDP/console session can use the same profile.
++// (The singleton message window and startup mutex are already per-session.)
++std::string SessionLockfileName() {
++  DWORD session_id = 0;
++  if (!::ProcessIdToSessionId(::GetCurrentProcessId(), &session_id))
++    return kLockfile;
++  return base::StringPrintf("%s.s%lu", kLockfile,
++                            static_cast<unsigned long>(session_id));
++}
++
+ // A helper class that acquires the given |mutex| while the AutoLockMutex is in
+ // scope.
+ class AutoLockMutex {
+@@ -480,7 +492,7 @@
+       // Chrome process is getting terminated.
+       const base::TimeDelta kTimeout = base::Seconds(5);
+       lock_file_ = CreateLockFileWithTimeout(
+-          user_data_dir_.AppendASCII(kLockfile), kTimeout);
++          user_data_dir_.AppendASCII(SessionLockfileName()), kTimeout);
+ 
+       if (lock_file_.IsValid()) {
+         // Set the window's title to the path of our user data directory so

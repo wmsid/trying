@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# chromium-multi: run several Chromium instances from the SAME profile, one per
+# X/VNC display. Chromium refuses a 2nd instance on a profile (SingletonLock) and
+# concurrent writers corrupt it, so each display gets its own copy-on-write view
+# of the shared base profile (overlayfs if root, else a reflink/plain copy).
+#
+# Usage: chromium-multi [options] [-- chromium args...]
+#   -d, --display :N     X display for this instance (default: $DISPLAY)
+#   -p, --profile DIR    shared base profile (default: ~/.config/chromium-multi/base)
+#   -b, --browser PATH   chromium binary (default: auto-detect)
+#       --xvfb [WxH]     start a virtual Xvfb on the display if it isn't running
+#       --reset          discard this display's instance changes, re-clone base
+#       --promote        copy this display's profile back over the base (after it exits)
+#       --port N         remote-debugging port (default: 9222 + display number)
+set -euo pipefail
+
+DISPLAY_ID="${DISPLAY:-:0}"; BASE="$HOME/.config/chromium-multi/base"
+BROWSER=""; XVFB=""; RESET=0; PROMOTE=0; PORT=""; EXTRA=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -d|--display) DISPLAY_ID="$2"; shift 2;;
+    -p|--profile) BASE="$2"; shift 2;;
+    -b|--browser) BROWSER="$2"; shift 2;;
+    --xvfb) XVFB=1280x800; if [[ "${2:-}" =~ ^[0-9]+x[0-9]+$ ]]; then XVFB="$2"; shift; fi; shift;;
+    --reset) RESET=1; shift;;
+    --promote) PROMOTE=1; shift;;
+    --port) PORT="$2"; shift 2;;
+    --) shift; EXTRA=("$@"); break;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0;;
+    *) EXTRA+=("$1"); shift;;
+  esac
+done
+
+if [ -z "$BROWSER" ]; then
+  for b in chromium chromium-browser google-chrome /opt/pw-browsers/chromium; do
+    command -v "$b" >/dev/null 2>&1 && { BROWSER="$(command -v "$b")"; break; }
+  done
+fi
+[ -n "$BROWSER" ] || { echo "no chromium found; use --browser" >&2; exit 1; }
+
+NUM="${DISPLAY_ID#*:}"; NUM="${NUM%%.*}"
+ROOT="$HOME/.local/share/chromium-multi/instances/d$NUM"
+MERGED="$ROOT/merged"; UPPER="$ROOT/upper"; WORK="$ROOT/work"
+PORT="${PORT:-$((9222 + NUM))}"
+mkdir -p "$BASE" "$ROOT"
+
+# Never copy locks or bulky regenerable caches
+EXCL=(--exclude='Singleton*' --exclude='Cache' --exclude='Code Cache' --exclude='GPUCache' --exclude='ShaderCache' --exclude='GrShaderCache')
+sync_dir() { # sync_dir SRC DST (tar: no rsync dependency)
+  mkdir -p "$2"; tar -C "$1" "${EXCL[@]}" -cf - . | tar -C "$2" -xf -; }
+
+if [ "$PROMOTE" = 1 ]; then
+  src="$MERGED"; [ -d "$UPPER" ] && mountpoint -q "$MERGED" 2>/dev/null || src="$ROOT/copy"
+  [ -d "$src" ] || { echo "nothing to promote for $DISPLAY_ID" >&2; exit 1; }
+  sync_dir "$src" "$BASE" && echo "promoted $DISPLAY_ID -> $BASE"; exit 0
+fi
+
+mountpoint -q "$MERGED" 2>/dev/null && umount "$MERGED" 2>/dev/null || true
+[ "$RESET" = 1 ] && rm -rf "$UPPER" "$WORK" "$ROOT/copy"
+
+PROFILE=""
+if [ "$(id -u)" = 0 ] && [ -z "${CM_FORCE_COPY:-}" ] && mkdir -p "$MERGED" "$UPPER" "$WORK" && \
+   mount -t overlay overlay -o "lowerdir=$BASE,upperdir=$UPPER,workdir=$WORK" "$MERGED" 2>/dev/null; then
+  PROFILE="$MERGED"; MODE=overlayfs
+else
+  PROFILE="$ROOT/copy"; MODE=copy
+  if [ ! -d "$PROFILE" ]; then
+    mkdir -p "$PROFILE"
+    sync_dir "$BASE" "$PROFILE"
+  fi
+fi
+rm -f "$PROFILE"/Singleton*
+
+if [ -n "$XVFB" ] && ! [ -e "/tmp/.X11-unix/X$NUM" ]; then
+  Xvfb ":$NUM" -screen 0 "${XVFB}x24" -nolisten tcp >/dev/null 2>&1 &
+  for _ in $(seq 50); do [ -e "/tmp/.X11-unix/X$NUM" ] && break; sleep 0.1; done
+fi
+
+echo "[chromium-multi] display=$DISPLAY_ID profile=$PROFILE ($MODE) debug-port=$PORT" >&2
+export DISPLAY="$DISPLAY_ID"
+FLAGS=(--user-data-dir="$PROFILE" --remote-debugging-port="$PORT" --no-first-run --password-store=basic)
+[ "$(id -u)" = 0 ] && FLAGS+=(--no-sandbox)
+exec "$BROWSER" "${FLAGS[@]}" "${EXTRA[@]}"

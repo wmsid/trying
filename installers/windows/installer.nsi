@@ -1,13 +1,25 @@
-; Windows setup program. Build with:
-;   makensis -DBRAND=slbzt -DDISPLAY=SLBZT -DVERSION=1.0.0 -DARCH=x64 -DEXE=path\slbzt.exe -DWINTUN=path\wintun.dll -DOUT=setup.exe installer.nsi
-; Silent install:  setup.exe /S /SETUPKEY=abcd        (the key is REQUIRED; optional: /MGMT=https://other-server:443)
+; ONE Windows setup program for every supported PC. It picks the right build at run time:
+;   Windows 10/11 x64 -> amd64     Windows 10/11 ARM64 -> arm64
+;   Windows 7/8/8.1 (64-bit) and any 32-bit Windows -> the Win7-compatible builds (if built with HAVE_WIN7)
+; and it is both the installer and the updater:
+;   - fresh machine: a setup key is required (wizard page, or /SETUPKEY= when silent)
+;   - already set up (config found in %ProgramData%\<DISPLAY>): replaces the program, keeps the config,
+;     reconnects as the same peer, no setup key needed (a supplied one is ignored)
+; Build (see scripts/build.sh):
+;   makensis -DBRAND=slbzt -DDISPLAY=SLBZT -DVERSION=1.1.0 -DWINDIR=<dir with amd64\ arm64\ [win7_amd64\ win7_386\]> [-DHAVE_WIN7] -DOUT=setup.exe installer.nsi
+;   each subdir holds <BRAND>.exe and wintun.dll
+; Silent install:  setup.exe /S /SETUPKEY=abcd   (optional /MGMT=https://other-server:443)
+; Silent update:   setup.exe /S
 ; Silent uninstall: "%ProgramFiles%\slbzt\uninstall.exe" /S
 Unicode true
+ManifestSupportedOS all
 !include MUI2.nsh
 !include nsDialogs.nsh
 !include LogicLib.nsh
 !include FileFunc.nsh
 !include WordFunc.nsh
+!include x64.nsh
+!include WinVer.nsh
 !insertmacro WordReplace
 !insertmacro WordFind
 !insertmacro un.WordReplace
@@ -22,12 +34,7 @@ Name "${DISPLAY}"
 OutFile "${OUT}"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
-!if "${ARCH}" == "x86"
-  InstallDir "$PROGRAMFILES32\${BRAND}"
-!else
-  InstallDir "$PROGRAMFILES64\${BRAND}"
-!endif
-InstallDirRegKey HKLM "Software\${BRAND}" "InstallDir"
+InstallDir "$PROGRAMFILES\${BRAND}"   ; replaced in .onInit by the right Program Files for this PC
 
 VIProductVersion "${VERSION}.0"
 VIAddVersionKey "LegalCopyright" "${DISPLAY}"
@@ -35,18 +42,6 @@ VIAddVersionKey "ProductName" "${DISPLAY}"
 VIAddVersionKey "FileDescription" "${DISPLAY} setup"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
-
-!define MUI_ABORTWARNING
-!insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_DIRECTORY
-Page custom KeyPageCreate KeyPageLeave
-!insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_TITLE "Installation complete"
-!define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishShow
-!insertmacro MUI_PAGE_FINISH
-!insertmacro MUI_UNPAGE_CONFIRM
-!insertmacro MUI_UNPAGE_INSTFILES
-!insertmacro MUI_LANGUAGE "English"
 
 Var KeyBox
 Var SetupKey
@@ -61,25 +56,106 @@ Var DnsName
 Var IpAddr
 Var DnsBox
 Var IpBox
+Var Variant        ; amd64 | arm64 | win7_amd64 | win7_386
+Var Update         ; 1 = this PC is already set up -> update in place
+Var WelcomeText
+Var FinishTitle
+Var Verb           ; "installed" / "updated"
+
+!define MUI_ABORTWARNING
+!define MUI_WELCOMEPAGE_TEXT "$WelcomeText"
+!insertmacro MUI_PAGE_WELCOME
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfUpdate
+!insertmacro MUI_PAGE_DIRECTORY
+Page custom KeyPageCreate KeyPageLeave
+!insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_TITLE "$FinishTitle"
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishShow
+!insertmacro MUI_PAGE_FINISH
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+!insertmacro MUI_LANGUAGE "English"
+
 
 Function .onInit
-  !if "${ARCH}" != "x86"
+  ${If} ${RunningX64}
     SetRegView 64
-  !endif
+  ${EndIf}
+
+  ; --- pick the build for this PC ---
+  StrCpy $Variant ""
+  ${If} ${IsNativeARM64}
+    StrCpy $Variant "arm64"
+  ${ElseIf} ${RunningX64}
+    ${If} ${AtLeastBuild} 10240
+      StrCpy $Variant "amd64"
+    ${Else}
+      !ifdef HAVE_WIN7
+        StrCpy $Variant "win7_amd64"
+      !endif
+    ${EndIf}
+  ${Else}
+    !ifdef HAVE_WIN7
+      StrCpy $Variant "win7_386"
+    !endif
+  ${EndIf}
+  ${If} $Variant == ""
+    MessageBox MB_OK|MB_ICONSTOP "${DISPLAY} does not support this version of Windows." /SD IDOK
+    SetErrorLevel 6
+    Abort
+  ${EndIf}
+
+  ; --- install folder: the previous one if any, else the native Program Files ---
+  ReadRegStr $0 HKLM "Software\${BRAND}" "InstallDir"
+  ${If} $0 != ""
+    StrCpy $INSTDIR $0
+  ${ElseIf} ${RunningX64}
+    StrCpy $INSTDIR "$PROGRAMFILES64\${BRAND}"
+  ${Else}
+    StrCpy $INSTDIR "$PROGRAMFILES\${BRAND}"
+  ${EndIf}
+
+  ; --- fresh install or update? (the client's config lives in %ProgramData%\<DISPLAY>) ---
+  SetShellVarContext all
+  StrCpy $Update 0
+  ${If} ${FileExists} "$APPDATA\${DISPLAY}\default.json"
+  ${OrIf} ${FileExists} "$APPDATA\${DISPLAY}\config.json"
+    StrCpy $Update 1
+  ${EndIf}
+  ${If} $Update == 1
+    StrCpy $Verb "updated"
+    StrCpy $FinishTitle "Update complete"
+    StrCpy $WelcomeText "${DISPLAY} is already set up on this computer.$\r$\n$\r$\nSetup will update it to version ${VERSION}. Your settings and connection are kept; no setup key is needed.$\r$\n$\r$\nClick Next to continue."
+  ${Else}
+    StrCpy $Verb "installed"
+    StrCpy $FinishTitle "Installation complete"
+    StrCpy $WelcomeText "Setup will install ${DISPLAY} ${VERSION} and connect this computer.$\r$\n$\r$\nYou will need the setup key you were given.$\r$\n$\r$\nClick Next to continue."
+  ${EndIf}
+
   ${GetParameters} $R0
   ${GetOptions} $R0 "/SETUPKEY=" $SetupKey
   ${GetOptions} $R0 "/MGMT=" $MgmtUrl
-  ${If} ${Silent}
+  ${If} $Update == 1
+    StrCpy $SetupKey ""        ; already registered: never re-use a key
+    StrCpy $MgmtUrl ""
+  ${ElseIf} ${Silent}
     StrLen $0 $SetupKey
     ${If} $0 < 8
-      SetErrorLevel 5          ; setup key is mandatory: /S /SETUPKEY=<key>
+      SetErrorLevel 5          ; fresh install: setup key is mandatory: /S /SETUPKEY=<key>
       Abort
     ${EndIf}
   ${EndIf}
 FunctionEnd
 
+Function SkipIfUpdate
+  ${If} $Update == 1
+    Abort                      ; keep the existing install folder
+  ${EndIf}
+FunctionEnd
+
 Function KeyPageCreate
   ${If} ${Silent}
+  ${OrIf} $Update == 1
     Abort
   ${EndIf}
   !insertmacro MUI_HEADER_TEXT "Connect" "A setup key is required to install."
@@ -105,7 +181,7 @@ Function FinishShow
   ${If} $FinishMsg != ""
     ShowWindow $mui.FinishPage.Text ${SW_HIDE}
     ${If} $Connected == 1
-      ${NSD_CreateLabel} 120u 45u 195u 14u "${DISPLAY} is installed and connected."
+      ${NSD_CreateLabel} 120u 45u 195u 14u "${DISPLAY} ${VERSION} is $Verb and connected."
       Pop $0
       SetCtlColors $0 "" transparent
       ${NSD_CreateLabel} 120u 64u 195u 10u "DNS name:"
@@ -194,18 +270,49 @@ Function TrimEnd
   Exch $R0
 FunctionEnd
 
+; Waits (up to ~15 s) until the service answers, so `up` does not race the service start.
+Function WaitForService
+  StrCpy $R5 0
+  wait_loop:
+    nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" status'
+    Pop $R6
+    Pop $R7
+    ${If} $R6 == 0
+      Return
+    ${EndIf}
+    IntOp $R5 $R5 + 1
+    ${If} $R5 < 15
+      Sleep 1000
+      Goto wait_loop
+    ${EndIf}
+FunctionEnd
+
+!macro PutFiles V
+  File "/oname=${BRAND}.exe" "${WINDIR}/${V}/${BRAND}.exe"
+  File "/oname=wintun.dll" "${WINDIR}/${V}/wintun.dll"
+!macroend
+
 Section "Install"
   InitPluginsDir
   SetOutPath "$INSTDIR"
-  ; Remove a previous install cleanly (ignore failures)
+  ; Stop the running copy (fresh install over a broken one, or an update); config is NOT touched
   IfFileExists "$INSTDIR\${BRAND}.exe" 0 +4
     nsExec::Exec '"$INSTDIR\${BRAND}.exe" service stop'
     nsExec::Exec '"$INSTDIR\${BRAND}.exe" service uninstall'
-    Sleep 1000
-  File "/oname=${BRAND}.exe" "${EXE}"
-  File "/oname=wintun.dll" "${WINTUN}"
+    Sleep 1500
+  DetailPrint "Installing the $Variant build"
+  ${If} $Variant == "arm64"
+    !insertmacro PutFiles arm64
+  ${ElseIf} $Variant == "amd64"
+    !insertmacro PutFiles amd64
+  !ifdef HAVE_WIN7
+  ${ElseIf} $Variant == "win7_amd64"
+    !insertmacro PutFiles win7_amd64
+  ${ElseIf} $Variant == "win7_386"
+    !insertmacro PutFiles win7_386
+  !endif
+  ${EndIf}
   WriteUninstaller "$INSTDIR\uninstall.exe"
-
 
   ; Add/Remove Programs
   WriteRegStr HKLM "Software\${BRAND}" "InstallDir" "$INSTDIR"
@@ -231,10 +338,13 @@ Section "Install"
     SetErrorLevel 3
     Abort
   ${EndIf}
+  Call WaitForService
 
-  ; Connect if a key was supplied (passed via a temp file, not the command line)
-  ${If} $SetupKey != ""
-    Sleep 3000
+  ; Connect. Fresh install: with the key (passed via a temp file, not the command line).
+  ; Update: the machine is already registered, so a plain `up` reconnects as the same peer.
+  ${If} $Update == 1
+    nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" up'
+  ${Else}
     FileOpen $2 "$PLUGINSDIR\key.txt" w
     FileWrite $2 "$SetupKey"
     FileClose $2
@@ -243,91 +353,94 @@ Section "Install"
     ${Else}
       nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" up --setup-key-file "$PLUGINSDIR\key.txt"'
     ${EndIf}
-    Pop $0
-    Pop $1
-    Delete "$PLUGINSDIR\key.txt"
-    ${If} $0 == 0
-      StrCpy $Connected 1
-      StrCpy $DnsName ""
-      StrCpy $IpAddr ""
-      ; The name/IP can take a few seconds to appear after "up": ask the client's own `status` command
-      ; (up to ~15 tries). `status --ipv4` prints just the IP; plain `status` has a "FQDN: <name>" line.
-      StrCpy $R5 0
-      poll_loop:
-        ${If} $IpAddr == ""
-          nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" status --ipv4'
-          Pop $R6
-          Pop $R7
-          ${If} $R6 == 0
-            Push $R7
-            Call TrimEnd
-            Pop $R7
-            StrLen $R8 $R7
-            ${If} $R8 >= 7
-            ${AndIf} $R8 <= 15
-              StrCpy $IpAddr $R7        ; the "no connection yet" help text is far longer than an IPv4 address
-            ${EndIf}
-          ${EndIf}
-        ${EndIf}
-        ${If} $DnsName == ""
-          nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" status'
-          Pop $R6
-          Pop $R7
-          ${If} $R6 == 0
-            StrCpy $R2 1
-            line_loop:
-              ClearErrors
-              ${WordFind} "$R7" "$\n" "E+$R2" $R3
-              IfErrors line_done
-              IntCmp $R2 60 line_done 0 line_done   ; hard cap: can never loop forever
-              Push $R3
-              Call TrimEnd
-              Pop $R3
-              StrCpy $R4 $R3 6
-              StrCmp $R4 "FQDN: " 0 next_line
-                StrCpy $DnsName $R3 "" 6
-                Goto line_done
-              next_line:
-              IntOp $R2 $R2 + 1
-              Goto line_loop
-            line_done:
-          ${EndIf}
-        ${EndIf}
-        ${If} $IpAddr != ""
-        ${AndIf} $DnsName != ""
-          Goto poll_done
-        ${EndIf}
-        IntOp $R5 $R5 + 1
-        ${If} $R5 < 15
-          Sleep 1000
-          Goto poll_loop
-        ${EndIf}
-      poll_done:
-      ${If} $DnsName == ""
-        StrCpy $DnsName "(not reported)"
-      ${EndIf}
+  ${EndIf}
+  Pop $0
+  Pop $1
+  Delete "$PLUGINSDIR\key.txt"
+  ${If} $0 == 0
+    StrCpy $Connected 1
+    StrCpy $DnsName ""
+    StrCpy $IpAddr ""
+    ; The name/IP can take a few seconds to appear after "up": ask the client's own `status` command
+    ; (up to ~15 tries). `status --ipv4` prints just the IP; plain `status` has a "FQDN: <name>" line.
+    StrCpy $R5 0
+    poll_loop:
       ${If} $IpAddr == ""
-        StrCpy $IpAddr "(not reported)"
+        nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" status --ipv4'
+        Pop $R6
+        Pop $R7
+        ${If} $R6 == 0
+          Push $R7
+          Call TrimEnd
+          Pop $R7
+          StrLen $R8 $R7
+          ${If} $R8 >= 7
+          ${AndIf} $R8 <= 15
+            StrCpy $IpAddr $R7        ; the "no connection yet" help text is far longer than an IPv4 address
+          ${EndIf}
+        ${EndIf}
       ${EndIf}
-      StrCpy $FinishMsg "connected"
-    ${Else}
-      StrCpy $Connected 0
-      ; make the client's plain line breaks display properly in an edit box
-      ClearErrors
-      ${WordReplace} "$1" "$\r$\n" "$\n" "+*" $1
-      ClearErrors
-      ${WordReplace} "$1" "$\n" "$\r$\n" "+*" $1
-      ClearErrors
-      StrCpy $FinishMsg "${DISPLAY} is installed, but connecting failed (code $0).$\r$\n$\r$\n$1$\r$\n$\r$\nCheck the key, then run (from the install folder):$\r$\n$\"$INSTDIR\${BRAND}.exe$\" up --setup-key <KEY>"
-      SetErrorLevel 4
+      ${If} $DnsName == ""
+        nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" status'
+        Pop $R6
+        Pop $R7
+        ${If} $R6 == 0
+          StrCpy $R2 1
+          line_loop:
+            ClearErrors
+            ${WordFind} "$R7" "$\n" "E+$R2" $R3
+            IfErrors line_done
+            IntCmp $R2 60 line_done 0 line_done   ; hard cap: can never loop forever
+            Push $R3
+            Call TrimEnd
+            Pop $R3
+            StrCpy $R4 $R3 6
+            StrCmp $R4 "FQDN: " 0 next_line
+              StrCpy $DnsName $R3 "" 6
+              Goto line_done
+            next_line:
+            IntOp $R2 $R2 + 1
+            Goto line_loop
+          line_done:
+        ${EndIf}
+      ${EndIf}
+      ${If} $IpAddr != ""
+      ${AndIf} $DnsName != ""
+        Goto poll_done
+      ${EndIf}
+      IntOp $R5 $R5 + 1
+      ${If} $R5 < 15
+        Sleep 1000
+        Goto poll_loop
+      ${EndIf}
+    poll_done:
+    ${If} $DnsName == ""
+      StrCpy $DnsName "(not reported)"
     ${EndIf}
+    ${If} $IpAddr == ""
+      StrCpy $IpAddr "(not reported)"
+    ${EndIf}
+    StrCpy $FinishMsg "connected"
+  ${Else}
+    StrCpy $Connected 0
+    ; make the client's plain line breaks display properly in an edit box
+    ClearErrors
+    ${WordReplace} "$1" "$\r$\n" "$\n" "+*" $1
+    ClearErrors
+    ${WordReplace} "$1" "$\n" "$\r$\n" "+*" $1
+    ClearErrors
+    StrCpy $FinishMsg "${DISPLAY} ${VERSION} is $Verb, but connecting failed (code $0).$\r$\n$\r$\n$1$\r$\n$\r$\nCheck the key, then run (from the install folder):$\r$\n$\"$INSTDIR\${BRAND}.exe$\" up --setup-key <KEY>"
+    SetErrorLevel 4
   ${EndIf}
 SectionEnd
 
-Section "Uninstall"
-  !if "${ARCH}" != "x86"
+Function un.onInit
+  ${If} ${RunningX64}
     SetRegView 64
-  !endif
+  ${EndIf}
+FunctionEnd
+
+Section "Uninstall"
   nsExec::Exec '"$INSTDIR\${BRAND}.exe" down'
   nsExec::Exec '"$INSTDIR\${BRAND}.exe" service stop'
   nsExec::Exec '"$INSTDIR\${BRAND}.exe" service uninstall'

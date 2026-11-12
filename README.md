@@ -36,33 +36,29 @@ firewall chain names, WireGuard interface (`slbzt0`, `utun150` on macOS) and lis
 Remaining caveat: both overlays should use **different IP ranges** (your management server's
 network range vs NetBird's default 100.64.0.0/10) and not push conflicting DNS/routes.
 
-## Updating an installed client
-Updating keeps the existing config (`/var/lib/<name>`, `%ProgramData%\<display name>`), so the machine stays the
-same peer with the same IP and reconnects on its own. No new setup key is needed, and the old one is not re-used.
-Replace `X.Y.Z` with the new `BUILD_VERSION` from `bin/`.
+## Install or update: one file per OS
+The same file installs on a new machine and updates an existing one. It detects the system and does the right thing:
+- **New machine:** installs and connects with the setup key you give it.
+- **Already set up** (config in `/var/lib/<name>` or `%ProgramData%\<display name>`): replaces the program, keeps the
+  config, and reconnects as the same peer with the same IP. No setup key is needed; one given is ignored.
 
-**Linux** (`uname -m`: `x86_64` -> `amd64`, `aarch64` -> `arm64`):
+Do **not** uninstall before updating: uninstalling deletes the config, so the machine would register as a new peer.
+
+**Linux**: `bin/slbzt_linux_setup.sh` detects the CPU (x86_64, arm64, armv6/7, i386/i686), downloads the matching
+build, checks its SHA-256 and installs or updates.
 ```bash
-curl -LO https://github.com/wmsid/trying/raw/main/bin/slbzt_X.Y.Z_linux_amd64.tar.gz
-tar xzf slbzt_X.Y.Z_linux_amd64.tar.gz && cd slbzt_X.Y.Z_linux_amd64
-sudo ./install.sh          # no key: stops the old service, replaces the binary, starts again
-sudo slbzt version         # should print X.Y.Z
-sudo slbzt status          # if it says disconnected: sudo slbzt up
+curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_linux_setup.sh | sudo bash -s -- <SETUP_KEY>   # new machine
+curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_linux_setup.sh | sudo bash                    # update
 ```
 
-**Windows**: either way works, run as Administrator.
-- **Zip (no key needed):** download `slbzt_X.Y.Z_windows_amd64.zip` (`windows_arm64` on ARM PCs, `windows7_*` on
-  Windows 7/8), extract it, then in an admin PowerShell inside the extracted folder:
-  ```powershell
-  powershell -ExecutionPolicy Bypass -File .\install.ps1
-  & "$env:ProgramFiles\slbzt\slbzt.exe" version
-  & "$env:ProgramFiles\slbzt\slbzt.exe" status
-  ```
-- **Setup .exe:** run the new `slbzt_X.Y.Z_windows_amd64_setup.exe` over the old install. It still asks for a setup
-  key (any valid key; it is ignored because the machine is already registered). Silent:
-  `slbzt_X.Y.Z_windows_amd64_setup.exe /S /SETUPKEY=<key>`.
+**Windows**: `bin/slbzt_windows_setup.exe` contains every Windows build and picks one at run time: Windows 10/11 x64,
+Windows 10/11 ARM64, or the Win7-compatible build on Windows 7/8/8.1 and 32-bit Windows. Double-click it; on a new
+PC it asks for the setup key, and on an already set-up PC it shows "update" and skips the key and folder pages.
+Silent: `slbzt_windows_setup.exe /S /SETUPKEY=<key>` (new PC; optional `/MGMT=https://other:443`) or
+`slbzt_windows_setup.exe /S` (update). Exit codes: 5 = new PC without key, 6 = unsupported Windows.
 
-Do **not** uninstall first: uninstalling deletes the config, so the machine would register as a new peer.
+Check the result with `sudo slbzt version` / `sudo slbzt status`
+(Windows: `& "$env:ProgramFiles\slbzt\slbzt.exe" status`).
 
 ## Requirements / caveats
 - You need a NetBird **management server** (self-hosted) - it issues setup keys. The client is only the peer side.
@@ -71,20 +67,19 @@ Do **not** uninstall first: uninstalling deletes the config, so the machine woul
 - The rebrand patch is regex-based; when bumping `NETBIRD_VERSION`, check the build output for `WARN: leftover brand strings`.
 
 ## Windows installer (.exe)
-`*_windows_*_setup.exe` / `*_windows7_*_setup.exe` are real setup programs (admin prompt, installs to Program Files,
-registers the service (does not modify PATH; run it from the install folder), shows in Add/Remove Programs, includes an uninstaller).
-Double-click: the wizard requires a setup key (Next is refused without one). Silent / scripted:
-`slbzt_..._setup.exe /S /SETUPKEY=abcd` (key required; optional `/MGMT=https://other:443`).
+`slbzt_windows_setup.exe` (see above) is a real setup program: admin prompt, installs to Program Files, registers the
+service (does not modify PATH; run it from the install folder), shows in Add/Remove Programs, includes an uninstaller.
 Uninstall: Settings > Apps, or `"%ProgramFiles%\slbzt\uninstall.exe" /S`.
-The `.zip` still contains `install.ps1`; if PowerShell blocks it, use
+The per-architecture `.zip` files still contain `install.ps1` for manual installs; if PowerShell blocks it, use
 `powershell -ExecutionPolicy Bypass -File .\install.ps1`.
 
 ## Linux
-`*_linux_{amd64,arm64,arm,386}.tar.gz`: `tar xzf ...; cd ...; sudo ./install.sh [SETUP_KEY]` installs a systemd
-(or init) service via `slbzt service install`. Static binaries (no libc dependency).
+Use `slbzt_linux_setup.sh` (see above). The per-CPU `*_linux_{amd64,arm64,arm,386}.tar.gz` archives it downloads can
+also be used by hand: `tar xzf ...; cd ...; sudo ./install.sh [SETUP_KEY]` (same install-or-update behaviour).
+It installs a systemd (or init) service via `slbzt service install`. Static binaries (no libc dependency).
 
 ## Windows 7 / 8 / 8.1
-`*_windows7_{amd64,386}.zip` are compiled with the community Go fork go-legacy-win7 (pinned in `brand.env`),
+The Win7 builds (inside `slbzt_windows_setup.exe`, and `*_windows7_{amd64,386}.zip`) are compiled with the community Go fork go-legacy-win7 (pinned in `brand.env`),
 because official Go dropped Win7 in 1.21. They compile cleanly but are **untested on real Windows 7**.
 The machine needs SP1 plus the SHA-2 code-signing update (KB4474419) for the network driver to load.
 Set `WIN7_GO_TAG=` empty to skip.

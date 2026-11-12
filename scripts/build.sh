@@ -27,14 +27,14 @@ pack() { # pack <os> <arch> <label> <gobin>
   cp "$ROOT/brand.env" "$out/brand.env"
   if [ "$os" = windows ]; then
     cp "$ROOT"/installers/windows/*.ps1 "$out/"
-    local narch=x64 wdir=amd64
-    [ "$arch" = arm64 ] && { narch=arm64; wdir=arm64; }
-    [ "$arch" = 386 ] && { narch=x86; wdir=x86; }
+    local wdir=amd64; [ "$arch" = arm64 ] && wdir=arm64; [ "$arch" = 386 ] && wdir=x86
     cp "$WORK/wintun/bin/$wdir/wintun.dll" "$out/wintun.dll"
-    makensis -V1 -DBRAND="$BRAND_NAME" -DDISPLAY="$BRAND_DISPLAY" -DVERSION="$BUILD_VERSION" -DARCH="$narch" \
-      -DEXE="$out/${BRAND_NAME}.exe" -DWINTUN="$out/wintun.dll" -DOUT="$DIST/${pkg}_setup.exe" "$ROOT/installers/windows/installer.nsi"
+    # stage for the single setup.exe: amd64 / arm64 / win7_amd64 / win7_386
+    local v="$arch"; [ "$label" = windows7 ] && v="win7_$arch"
+    mkdir -p "$WORK/win/$v"; cp "$out/${BRAND_NAME}.exe" "$out/wintun.dll" "$WORK/win/$v/"
     (cd "$DIST" && zip -qr "$pkg.zip" "$pkg")
-  else cp "$ROOT"/installers/$([ "$os" = linux ] && echo linux || echo macos)/*.sh "$out/"; chmod +x "$out"/*.sh; tar -C "$DIST" -czf "$DIST/$pkg.tar.gz" "$pkg"; fi
+  elif [ "$os" = linux ]; then cp "$ROOT"/installers/linux/install.sh "$ROOT"/installers/linux/uninstall.sh "$out/"; chmod +x "$out"/*.sh; tar -C "$DIST" -czf "$DIST/$pkg.tar.gz" "$pkg"
+  else cp "$ROOT"/installers/macos/*.sh "$out/"; chmod +x "$out"/*.sh; tar -C "$DIST" -czf "$DIST/$pkg.tar.gz" "$pkg"; fi
   rm -rf "$out"
 }
 for t in ${TARGETS:-windows/amd64 windows/arm64 darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 linux/arm linux/386}; do pack "${t%/*}" "${t#*/}" "${t%/*}" go; done
@@ -47,4 +47,16 @@ if [ -n "${WIN7_GO_TAG:-}" ] && [ "${SKIP_WIN7:-0}" != 1 ]; then
   G7="$WORK/go7/bin/go"
   for a in amd64 386; do GOROOT="$WORK/go7" GOTOOLCHAIN=local pack windows "$a" windows7 "$G7"; done
 fi
+# ONE Windows setup.exe for all PCs (picks the build at run time; installs or updates)
+if [ -d "$WORK/win/amd64" ] && [ -d "$WORK/win/arm64" ]; then
+NSIS_WIN7=(); [ -d "$WORK/win/win7_amd64" ] && [ -d "$WORK/win/win7_386" ] && NSIS_WIN7=(-DHAVE_WIN7)
+makensis -V1 -DBRAND="$BRAND_NAME" -DDISPLAY="$BRAND_DISPLAY" -DVERSION="$BUILD_VERSION" -DWINDIR="$WORK/win" "${NSIS_WIN7[@]}" \
+  -DOUT="$DIST/${BRAND_NAME}_windows_setup.exe" "$ROOT/installers/windows/installer.nsi"
+fi
+
+# ONE Linux script for all CPUs (downloads the matching build; installs or updates)
+[ ! -f "$DIST/${BRAND_NAME}_${BUILD_VERSION}_linux_amd64.tar.gz" ] || {
+sed -e "s#@BRAND@#${BRAND_NAME}#g" -e "s#@DISPLAY@#${BRAND_DISPLAY}#g" -e "s#@VERSION@#${BUILD_VERSION}#g" \
+    -e "s#@BASE_URL@#${DOWNLOAD_URL}#g" "$ROOT/installers/linux/setup.sh" > "$DIST/${BRAND_NAME}_linux_setup.sh"
+chmod +x "$DIST/${BRAND_NAME}_linux_setup.sh"; }
 ls -la "$DIST"

@@ -51,6 +51,18 @@ curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_linux_setup.sh | s
 curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_linux_setup.sh | sudo bash                    # update
 ```
 
+**macOS**: `bin/slbzt_macos_setup.sh` detects Apple Silicon or Intel (also when the shell runs under Rosetta),
+downloads the matching build, checks its SHA-256 and installs or updates. Files fetched with `curl` get no
+quarantine flag, so Gatekeeper does not block the unsigned binary.
+```bash
+curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_macos_setup.sh | sudo bash -s -- <SETUP_KEY>   # new Mac
+curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_macos_setup.sh | sudo bash                    # update
+```
+
+On Linux and macOS an update does not run `up`: the service reconnects by itself with the saved config. If the
+machine has to log in again (removed from the dashboard, or login expired), the script says so and prints the
+`up --setup-key` command instead of waiting. The Windows setup behaves the same way.
+
 **Windows**: `bin/slbzt_windows_setup.exe` contains every Windows build and picks one at run time: Windows 10/11 x64,
 Windows 10/11 ARM64, or the Win7-compatible build on Windows 7/8/8.1 and 32-bit Windows. Double-click it; on a new
 PC it asks for the setup key, and on an already set-up PC it shows "update" and skips the key and folder pages.

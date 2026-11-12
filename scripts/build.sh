@@ -54,9 +54,14 @@ makensis -V1 -DBRAND="$BRAND_NAME" -DDISPLAY="$BRAND_DISPLAY" -DVERSION="$BUILD_
   -DOUT="$DIST/${BRAND_NAME}_windows_setup.exe" "$ROOT/installers/windows/installer.nsi"
 fi
 
-# ONE Linux script for all CPUs (downloads the matching build; installs or updates)
-[ ! -f "$DIST/${BRAND_NAME}_${BUILD_VERSION}_linux_amd64.tar.gz" ] || {
-sed -e "s#@BRAND@#${BRAND_NAME}#g" -e "s#@DISPLAY@#${BRAND_DISPLAY}#g" -e "s#@VERSION@#${BUILD_VERSION}#g" \
-    -e "s#@BASE_URL@#${DOWNLOAD_URL}#g" "$ROOT/installers/linux/setup.sh" > "$DIST/${BRAND_NAME}_linux_setup.sh"
-chmod +x "$DIST/${BRAND_NAME}_linux_setup.sh"; }
+# ONE script per Unix OS (detects the CPU, downloads the matching build; installs or updates)
+gen_setup() { # gen_setup <os> <OS name> <archive os>
+  [ -f "$DIST/${BRAND_NAME}_${BUILD_VERSION}_$3_amd64.tar.gz" ] || return 0
+  sed -e "s#@BRAND@#${BRAND_NAME}#g" -e "s#@DISPLAY@#${BRAND_DISPLAY}#g" -e "s#@VERSION@#${BUILD_VERSION}#g" \
+      -e "s#@BASE_URL@#${DOWNLOAD_URL}#g" -e "s#@OS@#$1#g" -e "s#@OSNAME@#$2#g" \
+      "$ROOT/installers/setup.sh" > "$DIST/${BRAND_NAME}_$1_setup.sh"
+  chmod +x "$DIST/${BRAND_NAME}_$1_setup.sh"
+}
+gen_setup linux Linux linux
+gen_setup macos macOS darwin
 ls -la "$DIST"

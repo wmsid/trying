@@ -61,6 +61,7 @@ Var Update         ; 1 = this PC is already set up -> update in place
 Var WelcomeText
 Var FinishTitle
 Var Verb           ; "installed" / "updated"
+Var NeedLogin      ; 1 = update found the machine must log in again
 
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TEXT "$WelcomeText"
@@ -341,9 +342,11 @@ Section "Install"
   Call WaitForService
 
   ; Connect. Fresh install: with the key (passed via a temp file, not the command line).
-  ; Update: the machine is already registered, so a plain `up` reconnects as the same peer.
+  ; Update: do NOT run `up`. The service reconnects by itself with the saved config; if the machine
+  ; needed a new login, `up` would wait for an interactive login and setup would hang.
   ${If} $Update == 1
-    nsExec::ExecToStack '"$INSTDIR\${BRAND}.exe" up'
+    Push ""
+    Push 0
   ${Else}
     FileOpen $2 "$PLUGINSDIR\key.txt" w
     FileWrite $2 "$SetupKey"
@@ -385,6 +388,27 @@ Section "Install"
         Pop $R6
         Pop $R7
         ${If} $R6 == 0
+          ${If} $Update == 1
+            ClearErrors
+            ${WordFind} "$R7" "NeedsLogin" "E+1{" $R9
+            ${IfNot} ${Errors}
+              StrCpy $NeedLogin 1
+            ${EndIf}
+            ClearErrors
+            ${WordFind} "$R7" "LoginFailed" "E+1{" $R9
+            ${IfNot} ${Errors}
+              StrCpy $NeedLogin 1
+            ${EndIf}
+            ClearErrors
+            ${WordFind} "$R7" "SessionExpired" "E+1{" $R9
+            ${IfNot} ${Errors}
+              StrCpy $NeedLogin 1
+            ${EndIf}
+            ClearErrors
+            ${If} $NeedLogin == 1
+              Goto poll_done
+            ${EndIf}
+          ${EndIf}
           StrCpy $R2 1
           line_loop:
             ClearErrors
@@ -409,11 +433,23 @@ Section "Install"
         Goto poll_done
       ${EndIf}
       IntOp $R5 $R5 + 1
-      ${If} $R5 < 15
+      ${If} $R5 < 30
         Sleep 1000
         Goto poll_loop
       ${EndIf}
     poll_done:
+    ${If} $NeedLogin == 1
+      StrCpy $Connected 0
+      StrCpy $FinishMsg "${DISPLAY} was updated to ${VERSION}, but this computer must log in again (it was removed from the dashboard, or its login expired).$\r$\n$\r$\nRun (from the install folder):$\r$\n$\"$INSTDIR\${BRAND}.exe$\" up --setup-key <KEY>"
+      SetErrorLevel 4
+      Goto connect_done
+    ${EndIf}
+    ${If} $Update == 1
+    ${AndIf} $IpAddr == ""
+      StrCpy $Connected 0
+      StrCpy $FinishMsg "${DISPLAY} was updated to ${VERSION}. Your settings were kept.$\r$\n$\r$\nIt is still connecting in the background. To check, run (from the install folder):$\r$\n$\"$INSTDIR\${BRAND}.exe$\" status"
+      Goto connect_done
+    ${EndIf}
     ${If} $DnsName == ""
       StrCpy $DnsName "(not reported)"
     ${EndIf}
@@ -432,6 +468,7 @@ Section "Install"
     StrCpy $FinishMsg "${DISPLAY} ${VERSION} is $Verb, but connecting failed (code $0).$\r$\n$\r$\n$1$\r$\n$\r$\nCheck the key, then run (from the install folder):$\r$\n$\"$INSTDIR\${BRAND}.exe$\" up --setup-key <KEY>"
     SetErrorLevel 4
   ${EndIf}
+  connect_done:
 SectionEnd
 
 Function un.onInit

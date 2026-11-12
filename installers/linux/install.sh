@@ -30,7 +30,19 @@ for _ in $(seq 15); do "$BIN" status >/dev/null 2>&1 && break; sleep 1; done
 NEW="$("$BIN" version 2>/dev/null || true)"
 if [ "$UPDATE" = 1 ]; then
   echo "$BRAND_DISPLAY updated${OLD:+ from $OLD} to $NEW (settings kept)."
-  "$BIN" up
+  # The service reconnects by itself with the saved config. Do NOT run `up` here: if this
+  # machine needed a new login, `up` would wait for an interactive login and hang the update.
+  for _ in $(seq 30); do
+    if "$BIN" status 2>/dev/null | grep -qE 'Daemon status: (NeedsLogin|LoginFailed|SessionExpired)'; then
+      echo "This machine must log in again (removed from the dashboard or login expired)."
+      echo "Connect with: sudo $BRAND_NAME up --setup-key <KEY>"
+      exit 2
+    fi
+    IP="$("$BIN" status --ipv4 2>/dev/null | tr -d '[:space:]' || true)"
+    if echo "$IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then echo "Connected: $IP"; break; fi
+    sleep 1
+  done
+  [ -n "${IP:-}" ] && echo "$IP" | grep -qE '^[0-9.]+$' || echo "Still connecting in the background; check with: sudo $BRAND_NAME status"
 elif [ -n "$KEY" ]; then
   echo "$BRAND_DISPLAY $NEW installed."
   "$BIN" up --setup-key "$KEY"

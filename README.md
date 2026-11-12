@@ -36,6 +36,34 @@ firewall chain names, WireGuard interface (`slbzt0`, `utun150` on macOS) and lis
 Remaining caveat: both overlays should use **different IP ranges** (your management server's
 network range vs NetBird's default 100.64.0.0/10) and not push conflicting DNS/routes.
 
+## Updating an installed client
+Updating keeps the existing config (`/var/lib/<name>`, `%ProgramData%\<display name>`), so the machine stays the
+same peer with the same IP and reconnects on its own. No new setup key is needed, and the old one is not re-used.
+Replace `X.Y.Z` with the new `BUILD_VERSION` from `bin/`.
+
+**Linux** (`uname -m`: `x86_64` -> `amd64`, `aarch64` -> `arm64`):
+```bash
+curl -LO https://github.com/wmsid/trying/raw/main/bin/slbzt_X.Y.Z_linux_amd64.tar.gz
+tar xzf slbzt_X.Y.Z_linux_amd64.tar.gz && cd slbzt_X.Y.Z_linux_amd64
+sudo ./install.sh          # no key: stops the old service, replaces the binary, starts again
+sudo slbzt version         # should print X.Y.Z
+sudo slbzt status          # if it says disconnected: sudo slbzt up
+```
+
+**Windows**: either way works, run as Administrator.
+- **Zip (no key needed):** download `slbzt_X.Y.Z_windows_amd64.zip` (`windows_arm64` on ARM PCs, `windows7_*` on
+  Windows 7/8), extract it, then in an admin PowerShell inside the extracted folder:
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\install.ps1
+  & "$env:ProgramFiles\slbzt\slbzt.exe" version
+  & "$env:ProgramFiles\slbzt\slbzt.exe" status
+  ```
+- **Setup .exe:** run the new `slbzt_X.Y.Z_windows_amd64_setup.exe` over the old install. It still asks for a setup
+  key (any valid key; it is ignored because the machine is already registered). Silent:
+  `slbzt_X.Y.Z_windows_amd64_setup.exe /S /SETUPKEY=<key>`.
+
+Do **not** uninstall first: uninstalling deletes the config, so the machine would register as a new peer.
+
 ## Requirements / caveats
 - You need a NetBird **management server** (self-hosted) - it issues setup keys. The client is only the peer side.
 - Binaries are unsigned. Sign them (Authenticode on Windows; Developer ID + notarization on macOS) or Gatekeeper/SmartScreen will warn. The macOS script clears the quarantine flag, which helps for CLI use only.

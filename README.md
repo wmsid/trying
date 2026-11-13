@@ -40,9 +40,11 @@ network range vs NetBird's default 100.64.0.0/10) and not push conflicting DNS/r
 The same file installs on a new machine and updates an existing one. It detects the system and does the right thing:
 - **New machine:** installs and connects with the setup key you give it.
 - **Already set up** (config in `/var/lib/<name>` or `%ProgramData%\<display name>`): replaces the program, keeps the
-  config, and reconnects as the same peer with the same IP. No setup key is needed; one given is ignored.
+  config, and reconnects as the same peer with the same IP. No setup key is needed, but if you give one it is used
+  (useful when the machine was removed from the dashboard or its login expired).
 
 Do **not** uninstall before updating: uninstalling deletes the config, so the machine would register as a new peer.
+Linux/macOS uninstall: `sudo ./uninstall.sh` from an extracted archive (removes the service, program, config and logs).
 
 **Linux**: `bin/slbzt_linux_setup.sh` detects the CPU (x86_64, arm64, armv6/7, i386/i686), downloads the matching
 build, checks its SHA-256 and installs or updates.
@@ -59,13 +61,13 @@ curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_macos_setup.sh | s
 curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_macos_setup.sh | sudo bash                    # update
 ```
 
-On Linux and macOS an update does not run `up`: the service reconnects by itself with the saved config. If the
+On Linux and macOS an update without a key does not run `up`: the service reconnects by itself with the saved config. If the
 machine has to log in again (removed from the dashboard, or login expired), the script says so and prints the
 `up --setup-key` command instead of waiting. The Windows setup behaves the same way.
 
 **Windows**: `bin/slbzt_windows_setup.exe` contains every Windows build and picks one at run time: Windows 10/11 x64,
 Windows 10/11 ARM64, or the Win7-compatible build on Windows 7/8/8.1 and 32-bit Windows. Double-click it; on a new
-PC it asks for the setup key, and on an already set-up PC it shows "update" and skips the key and folder pages.
+PC it asks for the setup key, and on an already set-up PC it shows "update", skips the folder page and makes the key optional.
 Silent: `slbzt_windows_setup.exe /S /SETUPKEY=<key>` (new PC; optional `/MGMT=https://other:443`) or
 `slbzt_windows_setup.exe /S` (update). Exit codes: 5 = new PC without key, 6 = unsupported Windows.
 

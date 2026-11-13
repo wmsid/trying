@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # sudo ./install.sh [SETUP_KEY]
 # Installs, or updates in place, and connects.
-#   - fresh machine: connects with SETUP_KEY (or later: sudo <name> up --setup-key <KEY>)
-#   - already set up: keeps the config, reconnects as the same peer; no key needed (a given one is ignored)
+#   - SETUP_KEY given: always used to connect (fresh machine, or one that must log in again)
+#   - no key, already set up: keeps the config and reconnects as the same peer
+#   - no key, fresh machine: installs only (later: sudo <name> up --setup-key <KEY>)
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run with sudo"; exit 1; }
 cd "$(dirname "$0")"; source ./brand.env
@@ -28,7 +29,12 @@ install -m 755 "./$BRAND_NAME" "$BIN"
 for _ in $(seq 15); do "$BIN" status >/dev/null 2>&1 && break; sleep 1; done
 
 NEW="$("$BIN" version 2>/dev/null || true)"
-if [ "$UPDATE" = 1 ]; then
+if [ -n "$KEY" ]; then
+  if [ "$UPDATE" = 1 ]; then echo "$BRAND_DISPLAY updated${OLD:+ from $OLD} to $NEW (settings kept)."
+  else echo "$BRAND_DISPLAY $NEW installed."; fi
+  # with a setup key `up` never waits for an interactive login
+  "$BIN" up --setup-key "$KEY"
+elif [ "$UPDATE" = 1 ]; then
   echo "$BRAND_DISPLAY updated${OLD:+ from $OLD} to $NEW (settings kept)."
   # The service reconnects by itself with the saved config. Do NOT run `up` here: if this
   # machine needed a new login, `up` would wait for an interactive login and hang the update.
@@ -43,9 +49,6 @@ if [ "$UPDATE" = 1 ]; then
     sleep 1
   done
   [ -n "${IP:-}" ] && echo "$IP" | grep -qE '^[0-9.]+$' || echo "Still connecting in the background; check with: sudo $BRAND_NAME status"
-elif [ -n "$KEY" ]; then
-  echo "$BRAND_DISPLAY $NEW installed."
-  "$BIN" up --setup-key "$KEY"
 else
   echo "$BRAND_DISPLAY $NEW installed. Connect with: sudo $BRAND_NAME up --setup-key <KEY>"
   exit 0

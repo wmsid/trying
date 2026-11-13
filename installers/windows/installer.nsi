@@ -4,7 +4,7 @@
 ; and it is both the installer and the updater:
 ;   - fresh machine: a setup key is required (wizard page, or /SETUPKEY= when silent)
 ;   - already set up (config found in %ProgramData%\<DISPLAY>): replaces the program, keeps the config,
-;     reconnects as the same peer, no setup key needed (a supplied one is ignored)
+;     reconnects as the same peer; a setup key is optional and, if given, is used
 ; Build (see scripts/build.sh):
 ;   makensis -DBRAND=slbzt -DDISPLAY=SLBZT -DVERSION=1.1.0 -DWINDIR=<dir with amd64\ arm64\ [win7_amd64\ win7_386\]> [-DHAVE_WIN7] -DOUT=setup.exe installer.nsi
 ;   each subdir holds <BRAND>.exe and wintun.dll
@@ -62,6 +62,7 @@ Var WelcomeText
 Var FinishTitle
 Var Verb           ; "installed" / "updated"
 Var NeedLogin      ; 1 = update found the machine must log in again
+Var Passive        ; 1 = update without a key: let the service reconnect by itself
 
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TEXT "$WelcomeText"
@@ -126,7 +127,7 @@ Function .onInit
   ${If} $Update == 1
     StrCpy $Verb "updated"
     StrCpy $FinishTitle "Update complete"
-    StrCpy $WelcomeText "${DISPLAY} is already set up on this computer.$\r$\n$\r$\nSetup will update it to version ${VERSION}. Your settings and connection are kept; no setup key is needed.$\r$\n$\r$\nClick Next to continue."
+    StrCpy $WelcomeText "${DISPLAY} is already set up on this computer.$\r$\n$\r$\nSetup will update it to version ${VERSION}. Your settings and connection are kept; no setup key is needed (you can enter one on the next page if this computer must log in again).$\r$\n$\r$\nClick Next to continue."
   ${Else}
     StrCpy $Verb "installed"
     StrCpy $FinishTitle "Installation complete"
@@ -136,10 +137,8 @@ Function .onInit
   ${GetParameters} $R0
   ${GetOptions} $R0 "/SETUPKEY=" $SetupKey
   ${GetOptions} $R0 "/MGMT=" $MgmtUrl
-  ${If} $Update == 1
-    StrCpy $SetupKey ""        ; already registered: never re-use a key
-    StrCpy $MgmtUrl ""
-  ${ElseIf} ${Silent}
+  ${If} $Update == 0
+  ${AndIf} ${Silent}
     StrLen $0 $SetupKey
     ${If} $0 < 8
       SetErrorLevel 5          ; fresh install: setup key is mandatory: /S /SETUPKEY=<key>
@@ -156,13 +155,20 @@ FunctionEnd
 
 Function KeyPageCreate
   ${If} ${Silent}
-  ${OrIf} $Update == 1
     Abort
   ${EndIf}
-  !insertmacro MUI_HEADER_TEXT "Connect" "A setup key is required to install."
+  ${If} $Update == 1
+    !insertmacro MUI_HEADER_TEXT "Connect" "A setup key is optional for an update."
+  ${Else}
+    !insertmacro MUI_HEADER_TEXT "Connect" "A setup key is required to install."
+  ${EndIf}
   nsDialogs::Create 1018
   Pop $0
-  ${NSD_CreateLabel} 0 0 100% 24u "Paste the setup key you were given. Setup cannot continue without it, and it is used to connect this computer."
+  ${If} $Update == 1
+    ${NSD_CreateLabel} 0 0 100% 32u "This computer is already set up. Leave this empty to keep the current connection, or paste a setup key to connect with it (for example if this computer was removed from the dashboard)."
+  ${Else}
+    ${NSD_CreateLabel} 0 0 100% 24u "Paste the setup key you were given. Setup cannot continue without it, and it is used to connect this computer."
+  ${EndIf}
   Pop $0
   ${NSD_CreateText} 0 36u 100% 12u "$SetupKey"
   Pop $KeyBox
@@ -172,6 +178,10 @@ FunctionEnd
 Function KeyPageLeave
   ${NSD_GetText} $KeyBox $SetupKey
   StrLen $0 $SetupKey
+  ${If} $Update == 1
+  ${AndIf} $0 == 0
+    Return                     ; update without a key is fine
+  ${EndIf}
   ${If} $0 < 8
     MessageBox MB_OK|MB_ICONEXCLAMATION "Please enter your setup key to continue."
     Abort                      ; stay on this page
@@ -342,9 +352,15 @@ Section "Install"
   Call WaitForService
 
   ; Connect. Fresh install: with the key (passed via a temp file, not the command line).
-  ; Update: do NOT run `up`. The service reconnects by itself with the saved config; if the machine
-  ; needed a new login, `up` would wait for an interactive login and setup would hang.
+  ; Update without a key: do NOT run `up`. The service reconnects by itself with the saved config; if
+  ; the machine needed a new login, `up` would wait for an interactive login and setup would hang.
+  ; A key, when given, is always used (with a key `up` never waits for an interactive login).
+  StrCpy $Passive 0
   ${If} $Update == 1
+  ${AndIf} $SetupKey == ""
+    StrCpy $Passive 1
+  ${EndIf}
+  ${If} $Passive == 1
     Push ""
     Push 0
   ${Else}
@@ -388,7 +404,7 @@ Section "Install"
         Pop $R6
         Pop $R7
         ${If} $R6 == 0
-          ${If} $Update == 1
+          ${If} $Passive == 1
             ClearErrors
             ${WordFind} "$R7" "NeedsLogin" "E+1{" $R9
             ${IfNot} ${Errors}
@@ -444,7 +460,7 @@ Section "Install"
       SetErrorLevel 4
       Goto connect_done
     ${EndIf}
-    ${If} $Update == 1
+    ${If} $Passive == 1
     ${AndIf} $IpAddr == ""
       StrCpy $Connected 0
       StrCpy $FinishMsg "${DISPLAY} was updated to ${VERSION}. Your settings were kept.$\r$\n$\r$\nIt is still connecting in the background. To check, run (from the install folder):$\r$\n$\"$INSTDIR\${BRAND}.exe$\" status"

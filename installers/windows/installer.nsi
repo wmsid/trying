@@ -8,8 +8,13 @@
 ; Build (see scripts/build.sh):
 ;   makensis -DBRAND=slbzt -DDISPLAY=SLBZT -DVERSION=1.1.0 -DWINDIR=<dir with amd64\ arm64\ [win7_amd64\ win7_386\]> [-DHAVE_WIN7] -DOUT=setup.exe installer.nsi
 ;   each subdir holds <BRAND>.exe and wintun.dll
+;   each subdir also holds <BRAND>-proxy.exe (the separate proxy program, see proxy/)
+; Components: the VPN client (always) and the proxy (optional, unticked unless already installed).
 ; Silent install:  setup.exe /S /SETUPKEY=abcd   (optional /MGMT=https://other-server:443)
-; Silent update:   setup.exe /S
+; Silent update:   setup.exe /S                  (an installed proxy is updated too, keeping port and login)
+; Proxy (silent):  /PROXY=1 /PROXYPORT=3128 /PROXYUSER=<user> /PROXYPASS=<min 8 chars>   (/PROXY=0 removes it)
+;                  login is required for a new proxy; on update it is optional (omitted = keep current)
+; Exit codes: 5 = new PC without key, 6 = unsupported Windows, 7 = proxy port invalid/in use, 8 = proxy login missing/invalid
 ; Silent uninstall: "%ProgramFiles%\slbzt\uninstall.exe" /S
 Unicode true
 ManifestSupportedOS all
@@ -20,6 +25,7 @@ ManifestSupportedOS all
 !include WordFunc.nsh
 !include x64.nsh
 !include WinVer.nsh
+!include Sections.nsh
 !insertmacro WordReplace
 !insertmacro WordFind
 !insertmacro un.WordReplace
@@ -63,13 +69,27 @@ Var FinishTitle
 Var Verb           ; "installed" / "updated"
 Var NeedLogin      ; 1 = update found the machine must log in again
 Var Passive        ; 1 = update without a key: let the service reconnect by itself
+Var PInstalled     ; 1 = the proxy is already installed
+Var PCurPort       ; its current port (default 3128)
+Var PHasAuth       ; 1 = it already has a login
+Var PPort          ; chosen port
+Var PUser          ; chosen / current username
+Var PPass          ; new password (only when PNewAuth = 1)
+Var PNewAuth       ; 1 = write a new login
+Var PMsg           ; one-line result for the finish page
+Var PortBox
+Var UserBox
+Var PassBox
+Var Pass2Box
 
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TEXT "$WelcomeText"
 !insertmacro MUI_PAGE_WELCOME
 !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfUpdate
 !insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_COMPONENTS
 Page custom KeyPageCreate KeyPageLeave
+Page custom ProxyPageCreate ProxyPageLeave
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_TITLE "$FinishTitle"
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW FinishShow
@@ -145,6 +165,7 @@ Function .onInit
       Abort
     ${EndIf}
   ${EndIf}
+  Call InitProxy               ; defined after the sections (needs their indexes)
 FunctionEnd
 
 Function SkipIfUpdate
@@ -190,6 +211,11 @@ FunctionEnd
 
 Function FinishShow
   ${If} $FinishMsg != ""
+  ${AndIf} $PMsg != ""
+  ${AndIf} $Connected != 1
+    StrCpy $FinishMsg "$FinishMsg$\r$\n$\r$\n$PMsg"
+  ${EndIf}
+  ${If} $FinishMsg != ""
     ShowWindow $mui.FinishPage.Text ${SW_HIDE}
     ${If} $Connected == 1
       ${NSD_CreateLabel} 120u 45u 195u 14u "${DISPLAY} ${VERSION} is $Verb and connected."
@@ -209,9 +235,14 @@ Function FinishShow
       SetCtlColors $0 "" transparent
       nsDialogs::CreateControl EDIT "${DEFAULT_STYLES}|${WS_TABSTOP}|${ES_AUTOHSCROLL}|${ES_READONLY}" "${WS_EX_CLIENTEDGE}" 120u 107u 140u 13u "$IpAddr"
       Pop $IpBox
-      ${NSD_CreateLabel} 120u 128u 195u 34u "Press Copy to copy the DNS name, or select any text above. Finish becomes available shortly."
+      ${NSD_CreateLabel} 120u 128u 195u 26u "Press Copy to copy the DNS name, or select any text above. Finish becomes available shortly."
       Pop $0
       SetCtlColors $0 "" transparent
+      ${If} $PMsg != ""
+        ${NSD_CreateLabel} 120u 156u 195u 20u "$PMsg"
+        Pop $0
+        SetCtlColors $0 "" transparent
+      ${EndIf}
     ${Else}
       ; failure / other message: one read-only multi-line box
       nsDialogs::CreateControl EDIT "${DEFAULT_STYLES}|${WS_TABSTOP}|${WS_VSCROLL}|${ES_MULTILINE}|${ES_READONLY}" "${WS_EX_CLIENTEDGE}" 120u 45u 195u 110u "$FinishMsg"
@@ -303,7 +334,27 @@ FunctionEnd
   File "/oname=wintun.dll" "${WINDIR}/${V}/wintun.dll"
 !macroend
 
-Section "Install"
+!macro PutProxyAs V NAME
+  File "/oname=${NAME}" "${WINDIR}/${V}/${BRAND}-proxy.exe"
+!macroend
+
+; extracts this PC's proxy build as NAME into the current output folder
+!macro PutProxyVariant NAME
+  ${If} $Variant == "arm64"
+    !insertmacro PutProxyAs arm64 "${NAME}"
+  ${ElseIf} $Variant == "amd64"
+    !insertmacro PutProxyAs amd64 "${NAME}"
+  !ifdef HAVE_WIN7
+  ${ElseIf} $Variant == "win7_amd64"
+    !insertmacro PutProxyAs win7_amd64 "${NAME}"
+  ${ElseIf} $Variant == "win7_386"
+    !insertmacro PutProxyAs win7_386 "${NAME}"
+  !endif
+  ${EndIf}
+!macroend
+
+Section "${DISPLAY} VPN client" SEC_CLIENT
+  SectionIn RO
   InitPluginsDir
   SetOutPath "$INSTDIR"
   ; Stop the running copy (fresh install over a broken one, or an update); config is NOT touched
@@ -487,6 +538,294 @@ Section "Install"
   connect_done:
 SectionEnd
 
+; ---------------------------------------------------------------- proxy (separate program + service)
+Section /o "${DISPLAY} Proxy" SEC_PROXY
+  SetOutPath "$INSTDIR"
+  ${If} ${FileExists} "$INSTDIR\${BRAND}-proxy.exe"
+    nsExec::Exec '"$INSTDIR\${BRAND}-proxy.exe" service stop'
+    nsExec::Exec '"$INSTDIR\${BRAND}-proxy.exe" service uninstall'
+    Sleep 1000
+  ${EndIf}
+  !insertmacro PutProxyVariant "${BRAND}-proxy.exe"
+  nsExec::ExecToLog '"$INSTDIR\${BRAND}-proxy.exe" set-port $PPort --no-check'
+  Pop $0
+  ${If} $PNewAuth == 1
+    FileOpen $2 "$PLUGINSDIR\pp.txt" w
+    FileWrite $2 "$PPass"
+    FileClose $2
+    nsExec::ExecToLog '"$INSTDIR\${BRAND}-proxy.exe" set-auth "$PUser" --password-file "$PLUGINSDIR\pp.txt"'
+    Pop $0
+    Delete "$PLUGINSDIR\pp.txt"
+    StrCpy $PPass ""
+    ${If} $0 != 0
+      MessageBox MB_OK|MB_ICONSTOP "Could not save the proxy login (code $0)." /SD IDOK
+      SetErrorLevel 8
+    ${EndIf}
+  ${EndIf}
+  nsExec::ExecToLog '"$INSTDIR\${BRAND}-proxy.exe" service install'
+  Pop $0
+  nsExec::ExecToLog '"$INSTDIR\${BRAND}-proxy.exe" service start'
+  Pop $1
+  ${If} $0 != 0
+  ${OrIf} $1 != 0
+    MessageBox MB_OK|MB_ICONSTOP "The ${DISPLAY} Proxy service could not be installed or started (codes $0/$1)." /SD IDOK
+    StrCpy $PMsg "${DISPLAY} Proxy: service failed to start."
+    SetErrorLevel 9
+  ${Else}
+    StrCpy $PMsg "${DISPLAY} Proxy: port $PPort, user $PUser (on the VPN IP only)."
+  ${EndIf}
+  WriteRegDWORD HKLM "Software\${BRAND}" "Proxy" 1
+  WriteRegStr HKLM "Software\${BRAND}" "ProxyPort" "$PPort"
+  WriteRegStr HKLM "Software\${BRAND}" "ProxyUser" "$PUser"
+SectionEnd
+
+; removes the proxy when it was installed but is now unticked (or /PROXY=0)
+Section "-ProxyRemove"
+  ${IfNot} ${SectionIsSelected} ${SEC_PROXY}
+  ${AndIf} ${FileExists} "$INSTDIR\${BRAND}-proxy.exe"
+    nsExec::Exec '"$INSTDIR\${BRAND}-proxy.exe" service stop'
+    nsExec::Exec '"$INSTDIR\${BRAND}-proxy.exe" service uninstall'
+    Sleep 1000
+    Delete "$INSTDIR\${BRAND}-proxy.exe"
+    SetShellVarContext all
+    RMDir /r "$APPDATA\${BRAND}-proxy"
+    WriteRegDWORD HKLM "Software\${BRAND}" "Proxy" 0
+    DeleteRegValue HKLM "Software\${BRAND}" "ProxyPort"
+    DeleteRegValue HKLM "Software\${BRAND}" "ProxyUser"
+    StrCpy $PMsg "${DISPLAY} Proxy removed."
+  ${EndIf}
+SectionEnd
+
+!insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+  !insertmacro MUI_DESCRIPTION_TEXT ${SEC_CLIENT} "The ${DISPLAY} VPN client (always installed)."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SEC_PROXY} "Optional HTTP/HTTPS proxy that listens only on this computer's VPN address, so VPN users allowed by your access policy can send traffic out through this computer's internet connection. Requires a username and password."
+!insertmacro MUI_FUNCTION_DESCRIPTION_END
+
+; returns 0 in $0 when $1 is a valid port number (1-65535)
+Function ValidPort
+  StrCpy $0 1
+  StrLen $2 $1
+  ${If} $2 < 1
+  ${OrIf} $2 > 5
+    Return
+  ${EndIf}
+  IntOp $3 $1 + 0
+  ${If} "$3" != "$1"
+    Return                     ; not a plain number
+  ${EndIf}
+  ${If} $3 < 1
+  ${OrIf} $3 > 65535
+    Return
+  ${EndIf}
+  StrCpy $0 0
+FunctionEnd
+
+; $1 = port -> $0 = 0 if free (the installed proxy's current port counts as free)
+Function PortFree
+  ${If} $PInstalled == 1
+  ${AndIf} $1 == $PCurPort
+    StrCpy $0 0
+    Return
+  ${EndIf}
+  nsExec::ExecToStack '"$PLUGINSDIR\pcheck.exe" check-port $1'
+  Pop $0
+  Pop $2
+FunctionEnd
+
+; $1 = user, $2 = password, $3 = confirmation -> $0 = "" if ok, else the problem
+Function ValidLogin
+  StrCpy $0 ""
+  ${If} $1 == ""
+    StrCpy $0 "Please enter a proxy username."
+    Return
+  ${EndIf}
+  ClearErrors
+  ${WordFind} "$1" " " "E+1{" $4
+  ${IfNot} ${Errors}
+    StrCpy $0 "The username must not contain spaces."
+    Return
+  ${EndIf}
+  ClearErrors
+  ${WordFind} "$1" ":" "E+1{" $4
+  ${IfNot} ${Errors}
+    StrCpy $0 "The username must not contain ':'."
+    Return
+  ${EndIf}
+  ClearErrors
+  StrLen $4 $2
+  ${If} $4 < 8
+    StrCpy $0 "The password must be at least 8 characters."
+    Return
+  ${EndIf}
+  ${If} $2 != $3
+    StrCpy $0 "The passwords do not match."
+  ${EndIf}
+FunctionEnd
+
+; called from .onInit: current proxy state, silent options, preselection and silent validation
+Function InitProxy
+  ; a checker copy of this PC's proxy build, used for port checks and reading the current settings
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  !insertmacro PutProxyVariant "pcheck.exe"
+
+  StrCpy $PInstalled 0
+  ${If} ${FileExists} "$INSTDIR\${BRAND}-proxy.exe"
+    StrCpy $PInstalled 1
+  ${EndIf}
+  StrCpy $PCurPort 3128
+  StrCpy $PHasAuth 0
+  StrCpy $PUser ""
+  nsExec::ExecToStack '"$PLUGINSDIR\pcheck.exe" get-port'
+  Pop $0
+  Pop $1
+  ${If} $0 == 0
+    Push $1
+    Call TrimEnd
+    Pop $PCurPort
+  ${EndIf}
+  nsExec::ExecToStack '"$PLUGINSDIR\pcheck.exe" has-auth'
+  Pop $0
+  Pop $1
+  ${If} $0 == 0
+    Push $1
+    Call TrimEnd
+    Pop $PUser
+    StrCpy $PHasAuth 1
+  ${EndIf}
+  StrCpy $PPort $PCurPort
+  StrCpy $PNewAuth 0
+
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "/PROXY=" $R1
+  ${IfNot} ${Errors}
+    ${If} $R1 == 1
+      !insertmacro SelectSection ${SEC_PROXY}
+    ${Else}
+      !insertmacro UnselectSection ${SEC_PROXY}
+    ${EndIf}
+  ${ElseIf} $PInstalled == 1
+    !insertmacro SelectSection ${SEC_PROXY}   ; keep an installed proxy
+  ${EndIf}
+  ClearErrors
+  ${GetOptions} $R0 "/PROXYPORT=" $R1
+  ${IfNot} ${Errors}
+    StrCpy $PPort $R1
+  ${EndIf}
+  ClearErrors
+  ${GetOptions} $R0 "/PROXYUSER=" $R2
+  ${If} ${Errors}
+    StrCpy $R2 ""
+  ${EndIf}
+  ClearErrors
+  ${GetOptions} $R0 "/PROXYPASS=" $R3
+  ${If} ${Errors}
+    StrCpy $R3 ""
+  ${EndIf}
+  ClearErrors
+
+  ${If} ${Silent}
+  ${AndIf} ${SectionIsSelected} ${SEC_PROXY}
+    StrCpy $1 $PPort
+    Call ValidPort
+    ${If} $0 != 0
+      SetErrorLevel 7
+      Abort
+    ${EndIf}
+    Call PortFree
+    ${If} $0 != 0
+      SetErrorLevel 7          ; port in use
+      Abort
+    ${EndIf}
+    ${If} $R2 != ""
+    ${OrIf} $R3 != ""
+    ${OrIf} $PHasAuth != 1
+      StrCpy $1 $R2
+      StrCpy $2 $R3
+      StrCpy $3 $R3
+      Call ValidLogin
+      ${If} $0 != ""
+        SetErrorLevel 8        ; a new proxy needs /PROXYUSER= and /PROXYPASS=
+        Abort
+      ${EndIf}
+      StrCpy $PUser $R2
+      StrCpy $PPass $R3
+      StrCpy $PNewAuth 1
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
+
+Function ProxyPageCreate
+  ${IfNot} ${SectionIsSelected} ${SEC_PROXY}
+    Abort
+  ${EndIf}
+  ${If} ${Silent}
+    Abort
+  ${EndIf}
+  !insertmacro MUI_HEADER_TEXT "${DISPLAY} Proxy" "Port and login for the proxy."
+  nsDialogs::Create 1018
+  Pop $0
+  ${If} $PHasAuth == 1
+    ${NSD_CreateLabel} 0 0 100% 20u "The proxy listens only on this computer's VPN address. To keep the current login, leave both password fields empty."
+  ${Else}
+    ${NSD_CreateLabel} 0 0 100% 20u "The proxy listens only on this computer's VPN address. A username and password are required."
+  ${EndIf}
+  Pop $0
+  ${NSD_CreateLabel} 0 26u 70u 12u "Port:"
+  Pop $0
+  ${NSD_CreateNumber} 75u 24u 50u 12u "$PPort"
+  Pop $PortBox
+  ${NSD_CreateLabel} 0 44u 70u 12u "Username:"
+  Pop $0
+  ${NSD_CreateText} 75u 42u 150u 12u "$PUser"
+  Pop $UserBox
+  ${NSD_CreateLabel} 0 62u 70u 12u "Password:"
+  Pop $0
+  ${NSD_CreatePassword} 75u 60u 150u 12u ""
+  Pop $PassBox
+  ${NSD_CreateLabel} 0 80u 70u 12u "Repeat password:"
+  Pop $0
+  ${NSD_CreatePassword} 75u 78u 150u 12u ""
+  Pop $Pass2Box
+  ${NSD_CreateLabel} 0 100u 100% 30u "Default port: 3128. Setup checks that the port is free. Allow access in your VPN dashboard with an access policy to this computer on this port."
+  Pop $0
+  nsDialogs::Show
+FunctionEnd
+
+Function ProxyPageLeave
+  ${NSD_GetText} $PortBox $1
+  Call ValidPort
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Please enter a port number between 1 and 65535."
+    Abort
+  ${EndIf}
+  Call PortFree
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Port $1 is already in use on this computer. Please choose another port."
+    Abort
+  ${EndIf}
+  StrCpy $PPort $1
+  ${NSD_GetText} $UserBox $1
+  ${NSD_GetText} $PassBox $2
+  ${NSD_GetText} $Pass2Box $3
+  ${If} $PHasAuth == 1
+  ${AndIf} $2 == ""
+  ${AndIf} $3 == ""
+  ${AndIf} $1 == $PUser
+    StrCpy $PNewAuth 0         ; keep the current login
+    Return
+  ${EndIf}
+  Call ValidLogin
+  ${If} $0 != ""
+    MessageBox MB_OK|MB_ICONEXCLAMATION "$0"
+    Abort
+  ${EndIf}
+  StrCpy $PUser $1
+  StrCpy $PPass $2
+  StrCpy $PNewAuth 1
+FunctionEnd
+
 Function un.onInit
   ${If} ${RunningX64}
     SetRegView 64
@@ -494,6 +833,14 @@ Function un.onInit
 FunctionEnd
 
 Section "Uninstall"
+  SetShellVarContext all
+  ${If} ${FileExists} "$INSTDIR\${BRAND}-proxy.exe"
+    nsExec::Exec '"$INSTDIR\${BRAND}-proxy.exe" service stop'
+    nsExec::Exec '"$INSTDIR\${BRAND}-proxy.exe" service uninstall'
+    Sleep 500
+    Delete "$INSTDIR\${BRAND}-proxy.exe"
+  ${EndIf}
+  RMDir /r "$APPDATA\${BRAND}-proxy"   ; %ProgramData%\<brand>-proxy (proxy config, log)
   nsExec::Exec '"$INSTDIR\${BRAND}.exe" down'
   nsExec::Exec '"$INSTDIR\${BRAND}.exe" service stop'
   nsExec::Exec '"$INSTDIR\${BRAND}.exe" service uninstall'

@@ -74,6 +74,35 @@ Silent: `slbzt_windows_setup.exe /S /SETUPKEY=<key>` (new PC; optional `/MGMT=ht
 Check the result with `sudo slbzt version` / `sudo slbzt status`
 (Windows: `& "$env:ProgramFiles\slbzt\slbzt.exe" status`).
 
+## Optional proxy (`slbzt-proxy`)
+An HTTP/HTTPS forward proxy that can be installed next to the VPN client, so machines on the VPN can send
+traffic out through a client's internet connection (for sites that allow only certain IP addresses).
+- **Separate program and service** (`proxy/`, service `slbzt-proxy`), never mixed into the NetBird source, so the
+  client stays a plain version bump. Its only link to the client is `slbzt status --ipv4`, polled to learn the VPN IP.
+- **Listens only on the VPN IP** (nothing while the VPN is down; follows IP changes). Who can reach it is decided
+  by your dashboard: add an access policy allowing the server(s) to the clients on the proxy port.
+- **Login required** (HTTP Basic, username + password of at least 8 characters, set per machine at install; only a
+  salted hash is stored in `/var/lib/slbzt-proxy/config.json` or `%ProgramData%\slbzt-proxy\config.json`).
+- HTTPS goes through as an unchanged tunnel (CONNECT); plain HTTP is forwarded.
+- By default it refuses destinations on loopback, LAN, link-local and the VPN range, so VPN users cannot reach the
+  client's own network. Set `"allow_private": true` in its config to allow that.
+- Log: `proxy.log` in the same folder.
+
+**Not installed unless chosen.** Existing commands behave exactly as before.
+- **Windows:** the setup has a Components page; the proxy is unticked unless already installed. Ticking it shows a
+  page for the port (default 3128, checked to be free) and the login. Silent:
+  `/PROXY=1 /PROXYPORT=3128 /PROXYUSER=<user> /PROXYPASS=<password>`; `/PROXY=0` removes it. Exit codes 7 (port
+  invalid or in use) and 8 (login missing or invalid).
+- **Linux/macOS:** when run in a terminal, the script asks whether to install the proxy (default No), then asks for
+  the port and login. Unattended:
+  ```bash
+  PROXY_PASSWORD='<password>' bash -c 'curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_linux_setup.sh | sudo -E bash -s -- <SETUP_KEY> --proxy --proxy-user <user> --proxy-port 3128'
+  ```
+  Options: `--proxy`, `--no-proxy` (remove), `--proxy-port <port>`, `--proxy-user <user>`,
+  `--proxy-password-file <file>` (or the `PROXY_PASSWORD` environment variable).
+- **Updates** keep an installed proxy with its port and login, unless you give new ones.
+- Use it from the server: `curl -x http://<user>:<password>@<client VPN IP>:3128 https://example.com`.
+
 ## Requirements / caveats
 - You need a NetBird **management server** (self-hosted) - it issues setup keys. The client is only the peer side.
 - Binaries are unsigned. Sign them (Authenticode on Windows; Developer ID + notarization on macOS) or Gatekeeper/SmartScreen will warn. The macOS script clears the quarantine flag, which helps for CLI use only.

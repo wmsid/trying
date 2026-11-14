@@ -20,6 +20,10 @@ pack() { # pack <os> <arch> <label> <gobin>
   local pkg="${BRAND_NAME}_${BUILD_VERSION}_${label}_${arch}"; local out="$DIST/$pkg"; mkdir -p "$out"
   echo ">> $label/$arch"
   GOOS=$os GOARCH=$arch "$gobin" build -ldflags "$LDF" -o "$out/${BRAND_NAME}${ext}" ./client
+  # the proxy: our own separate program (proxy/), never mixed into the NetBird source
+  (cd "$ROOT/proxy" && GOOS=$os GOARCH=$arch "$gobin" build -trimpath \
+     -ldflags "-s -w -X main.brand=${BRAND_NAME} -X main.display=${BRAND_DISPLAY} -X main.version=${BUILD_VERSION}" \
+     -o "$out/${BRAND_NAME}-proxy${ext}" .)
   for bad in 'pkgs.netbird.io' 'github.com/netbirdio/netbird/releases' 'ingest.netbird.io' 'publickeys.netbird.io' \
              'NetbirdDebugTriggerEvent' 'f2f29e61-d91f-4d76-8151-119b20c4bdeb' 'upload.debug.netbird.io'; do
     if grep -aqF "$bad" "$out/${BRAND_NAME}${ext}"; then echo "FATAL: binary still contains upstream string: $bad"; exit 1; fi
@@ -31,7 +35,7 @@ pack() { # pack <os> <arch> <label> <gobin>
     cp "$WORK/wintun/bin/$wdir/wintun.dll" "$out/wintun.dll"
     # stage for the single setup.exe: amd64 / arm64 / win7_amd64 / win7_386
     local v="$arch"; [ "$label" = windows7 ] && v="win7_$arch"
-    mkdir -p "$WORK/win/$v"; cp "$out/${BRAND_NAME}.exe" "$out/wintun.dll" "$WORK/win/$v/"
+    mkdir -p "$WORK/win/$v"; cp "$out/${BRAND_NAME}.exe" "$out/${BRAND_NAME}-proxy.exe" "$out/wintun.dll" "$WORK/win/$v/"
     (cd "$DIST" && zip -qr "$pkg.zip" "$pkg")
   elif [ "$os" = linux ]; then cp "$ROOT"/installers/linux/install.sh "$ROOT"/installers/linux/uninstall.sh "$out/"; chmod +x "$out"/*.sh; tar -C "$DIST" -czf "$DIST/$pkg.tar.gz" "$pkg"
   else cp "$ROOT"/installers/macos/*.sh "$out/"; chmod +x "$out"/*.sh; tar -C "$DIST" -czf "$DIST/$pkg.tar.gz" "$pkg"; fi

@@ -1,28 +1,153 @@
-# Headless, unbranded NetBird client (Windows + macOS)
+# SLBZT VPN client (Windows, Linux, macOS)
 
-A build pipeline that takes upstream NetBird, strips the branding, bakes in **your**
-management server, and ships a UI-less client that runs as a system service.
+A headless (no GUI) VPN client built from NetBird, pre-configured for **zt.skylinebiz.in**. It runs as a
+background service. Optionally, it can also install **SLBZT Proxy**, an HTTP/HTTPS proxy that listens only on the
+machine's VPN address.
 
-End-user experience:
+# Installation
 
+**Before you start:**
+- Get a **setup key** from the dashboard. A new machine needs one; an update does not.
+- You need administrator rights (Windows) or `sudo` (Linux, macOS).
+- The same file installs on a new machine and updates an existing one. Updating keeps the machine's settings,
+  identity and VPN IP, so **do not uninstall before updating**.
+
+## Windows
+
+Works on Windows 10/11 (x64 and ARM64) and Windows 7/8/8.1 (64- and 32-bit). The one setup file picks the right
+build for the PC.
+
+**Install**
+1. Download **[slbzt_windows_setup.exe](https://github.com/wmsid/trying/raw/main/bin/slbzt_windows_setup.exe)**.
+2. Double-click it and allow the administrator prompt. The file is not code-signed, so if Windows shows
+   "Windows protected your PC", click **More info**, then **Run anyway**.
+3. Click through the wizard:
+   - **Components:** "SLBZT VPN client" is always installed. Tick "SLBZT Proxy" only if this PC should run the
+     proxy (see [Optional proxy](#optional-slbzt-proxy)).
+   - **Setup key:** paste your key.
+4. The last page shows the PC's **DNS name** and **IP address** on the VPN.
+
+**Check** (PowerShell as Administrator):
+```powershell
+& "$env:ProgramFiles\slbzt\slbzt.exe" status
 ```
-# Windows (admin PowerShell)             # macOS
-.\install.ps1                            sudo ./install.sh
-slbzt up --setup-key abcd             sudo slbzt up --setup-key abcd
-```
-(or one step: `.\install.ps1 -SetupKey abcd` / `sudo ./install.sh abcd`)
 
-No management URL to type, no GUI, no "NetBird" anywhere in CLI, service name,
-config dirs (`%ProgramData%\<name>`, `/var/lib/<name>`), socket or pipe names.
+**Update:** run the newest `slbzt_windows_setup.exe` again. It detects the existing install, skips the folder
+page and makes the setup key optional. Leave the key empty unless the PC was removed from the dashboard.
+
+**Silent install / update** (for scripts and deployment tools, run as Administrator):
+```powershell
+.\slbzt_windows_setup.exe /S /SETUPKEY=<SETUP_KEY>
+```
+```powershell
+.\slbzt_windows_setup.exe /S
+```
+The first installs on a new PC (key required); the second updates an existing one. Exit codes: 0 = OK,
+4 = installed but not connected, 5 = new PC without a key, 6 = unsupported Windows, 7 = proxy port invalid or in
+use, 8 = proxy login missing or invalid, 9 = proxy service failed to start.
+
+**Uninstall:** Settings > Apps > **SLBZT** > Uninstall, or silently:
+```powershell
+& "$env:ProgramFiles\slbzt\uninstall.exe" /S
+```
+
+## Linux
+
+Works on x86_64, arm64, 32-bit ARM (armv6/armv7) and 32-bit x86, on any distribution with systemd or SysV init.
+The script detects the CPU, downloads the matching build and checks its checksum.
+
+**Install:**
+```bash
+curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_linux_setup.sh | sudo bash -s -- <SETUP_KEY>
+```
+When run in a terminal, the script asks whether to also install SLBZT Proxy (default: No).
+
+**Check:**
+```bash
+sudo slbzt status
+```
+
+**Update:**
+```bash
+curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_linux_setup.sh | sudo bash
+```
+If the machine was removed from the dashboard or its login expired, the script says so; run the install command
+above with a setup key.
+
+**Uninstall** (removes the client, the proxy if installed, and their settings):
+```bash
+sudo slbzt-proxy service stop 2>/dev/null; sudo slbzt-proxy service uninstall 2>/dev/null; sudo rm -rf /usr/local/bin/slbzt-proxy /var/lib/slbzt-proxy
+```
+```bash
+sudo slbzt down; sudo slbzt service stop; sudo slbzt service uninstall; sudo rm -rf /usr/local/bin/slbzt /var/lib/slbzt /etc/slbzt /var/log/slbzt
+```
+(Or run `sudo ./uninstall.sh` from an extracted `slbzt_*_linux_*.tar.gz` archive.)
+
+## macOS
+
+Works on Apple Silicon and Intel Macs. The script detects the CPU (also from a Terminal running under Rosetta),
+downloads the matching build and checks its checksum. Run these in **Terminal**; `sudo` asks for your Mac password.
+
+**Install:**
+```bash
+curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_macos_setup.sh | sudo bash -s -- <SETUP_KEY>
+```
+The script asks whether to also install SLBZT Proxy (default: No). Files downloaded this way are not blocked by
+Gatekeeper, even though they are not signed.
+
+**Check:**
+```bash
+sudo slbzt status
+```
+
+**Update:**
+```bash
+curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_macos_setup.sh | sudo bash
+```
+
+**Uninstall:** the same commands as on [Linux](#linux).
+
+## Optional: SLBZT Proxy
+
+An HTTP/HTTPS proxy that lets machines on the VPN send traffic out through this machine's internet connection, for
+example to reach a service that only accepts certain IP addresses. It is **not installed unless you choose it**.
+- It listens **only on the machine's VPN address**, never on its local network or the internet.
+- It requires a **username and password** (at least 8 characters), chosen during installation.
+- The **port** defaults to 3128; the installer checks that it is free.
+
+**Choose it during installation:**
+- **Windows:** tick **SLBZT Proxy** on the Components page, then enter the port, username and password.
+  Silently, add `/PROXY=1 /PROXYPORT=3128 /PROXYUSER=<user> /PROXYPASS=<password>` to the setup command.
+- **Linux / macOS:** answer **y** when asked, then enter the port, username and password. Without prompts (for
+  example over SSH automation), put the password in a file and run (use `slbzt_macos_setup.sh` on a Mac):
+  ```bash
+  curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_linux_setup.sh | sudo bash -s -- <SETUP_KEY> --proxy --proxy-port 3128 --proxy-user <user> --proxy-password-file /path/to/password.txt
+  ```
+
+**Updates** keep an installed proxy with its port and login. To change them, run the installer again and enter new
+values (Linux/macOS: add `--proxy-port <port>` and/or `--proxy-user <user> --proxy-password-file <file>`).
+To remove only the proxy: untick it in the Windows setup (silently: `/PROXY=0`), or add `--no-proxy` on Linux/macOS.
+
+**Allow access in the dashboard:** add an access policy that allows your server(s) to reach these machines on the
+proxy port (TCP 3128 by default). Without it, the VPN blocks the connection.
+
+**Use it from your server:**
+```bash
+curl -x http://<user>:<password>@<machine VPN IP>:3128 https://example.com
+```
+
+---
+
+# For maintainers
 
 ## Build
 
-1. Edit `brand.env` (name, display name, `MGMT_URL`, upstream version).
-2. `./scripts/build.sh` (needs Go, git, zip). Output in `dist/`:
-   `*_windows_{amd64,arm64}.zip`, `*_darwin_{amd64,arm64}.tar.gz`.
-   Or push a `v*` tag and GitHub Actions builds and attaches them to a release.
-
-Hand users the archive for their OS plus a setup key from your dashboard.
+1. Edit `brand.env` (name, display name, `MGMT_URL`, upstream `NETBIRD_VERSION`) and **always raise
+   `BUILD_VERSION`** for any change users install (see `CLAUDE.md`).
+2. `./scripts/build.sh` (needs Go, git, zip, curl, makensis). Output in `dist/`: `slbzt_windows_setup.exe`,
+   `slbzt_linux_setup.sh`, `slbzt_macos_setup.sh`, plus per-OS/CPU `.zip`/`.tar.gz` archives.
+   Pushing to `main` makes GitHub Actions build and commit them to `bin/` (what users download);
+   pushing a `v*` tag attaches them to a GitHub release.
 
 ## What the rebrand does (`scripts/rebrand.sh`)
 - Renames CLI, service, config/log/state dirs, unix socket, Windows pipe, help text.
@@ -36,45 +161,7 @@ firewall chain names, WireGuard interface (`slbzt0`, `utun150` on macOS) and lis
 Remaining caveat: both overlays should use **different IP ranges** (your management server's
 network range vs NetBird's default 100.64.0.0/10) and not push conflicting DNS/routes.
 
-## Install or update: one file per OS
-The same file installs on a new machine and updates an existing one. It detects the system and does the right thing:
-- **New machine:** installs and connects with the setup key you give it.
-- **Already set up** (config in `/var/lib/<name>` or `%ProgramData%\<display name>`): replaces the program, keeps the
-  config, and reconnects as the same peer with the same IP. No setup key is needed, but if you give one it is used
-  (useful when the machine was removed from the dashboard or its login expired).
-
-Do **not** uninstall before updating: uninstalling deletes the config, so the machine would register as a new peer.
-Linux/macOS uninstall: `sudo ./uninstall.sh` from an extracted archive (removes the service, program, config and logs).
-
-**Linux**: `bin/slbzt_linux_setup.sh` detects the CPU (x86_64, arm64, armv6/7, i386/i686), downloads the matching
-build, checks its SHA-256 and installs or updates.
-```bash
-curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_linux_setup.sh | sudo bash -s -- <SETUP_KEY>   # new machine
-curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_linux_setup.sh | sudo bash                    # update
-```
-
-**macOS**: `bin/slbzt_macos_setup.sh` detects Apple Silicon or Intel (also when the shell runs under Rosetta),
-downloads the matching build, checks its SHA-256 and installs or updates. Files fetched with `curl` get no
-quarantine flag, so Gatekeeper does not block the unsigned binary.
-```bash
-curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_macos_setup.sh | sudo bash -s -- <SETUP_KEY>   # new Mac
-curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_macos_setup.sh | sudo bash                    # update
-```
-
-On Linux and macOS an update without a key does not run `up`: the service reconnects by itself with the saved config. If the
-machine has to log in again (removed from the dashboard, or login expired), the script says so and prints the
-`up --setup-key` command instead of waiting. The Windows setup behaves the same way.
-
-**Windows**: `bin/slbzt_windows_setup.exe` contains every Windows build and picks one at run time: Windows 10/11 x64,
-Windows 10/11 ARM64, or the Win7-compatible build on Windows 7/8/8.1 and 32-bit Windows. Double-click it; on a new
-PC it asks for the setup key, and on an already set-up PC it shows "update", skips the folder page and makes the key optional.
-Silent: `slbzt_windows_setup.exe /S /SETUPKEY=<key>` (new PC; optional `/MGMT=https://other:443`) or
-`slbzt_windows_setup.exe /S` (update). Exit codes: 5 = new PC without key, 6 = unsupported Windows.
-
-Check the result with `sudo slbzt version` / `sudo slbzt status`
-(Windows: `& "$env:ProgramFiles\slbzt\slbzt.exe" status`).
-
-## Optional proxy (`slbzt-proxy`)
+## How the proxy works (`slbzt-proxy`)
 An HTTP/HTTPS forward proxy that can be installed next to the VPN client, so machines on the VPN can send
 traffic out through a client's internet connection (for sites that allow only certain IP addresses).
 - **Separate program and service** (`proxy/`, service `slbzt-proxy`), never mixed into the NetBird source, so the
@@ -88,21 +175,6 @@ traffic out through a client's internet connection (for sites that allow only ce
   client's own network. Set `"allow_private": true` in its config to allow that.
 - Log: `proxy.log` in the same folder.
 
-**Not installed unless chosen.** Existing commands behave exactly as before.
-- **Windows:** the setup has a Components page; the proxy is unticked unless already installed. Ticking it shows a
-  page for the port (default 3128, checked to be free) and the login. Silent:
-  `/PROXY=1 /PROXYPORT=3128 /PROXYUSER=<user> /PROXYPASS=<password>`; `/PROXY=0` removes it. Exit codes 7 (port
-  invalid or in use) and 8 (login missing or invalid).
-- **Linux/macOS:** when run in a terminal, the script asks whether to install the proxy (default No), then asks for
-  the port and login. Unattended:
-  ```bash
-  PROXY_PASSWORD='<password>' bash -c 'curl -fsSL https://github.com/wmsid/trying/raw/main/bin/slbzt_linux_setup.sh | sudo -E bash -s -- <SETUP_KEY> --proxy --proxy-user <user> --proxy-port 3128'
-  ```
-  Options: `--proxy`, `--no-proxy` (remove), `--proxy-port <port>`, `--proxy-user <user>`,
-  `--proxy-password-file <file>` (or the `PROXY_PASSWORD` environment variable).
-- **Updates** keep an installed proxy with its port and login, unless you give new ones.
-- Use it from the server: `curl -x http://<user>:<password>@<client VPN IP>:3128 https://example.com`.
-
 ## Requirements / caveats
 - You need a NetBird **management server** (self-hosted) - it issues setup keys. The client is only the peer side.
 - Binaries are unsigned. Sign them (Authenticode on Windows; Developer ID + notarization on macOS) or Gatekeeper/SmartScreen will warn. The macOS script clears the quarantine flag, which helps for CLI use only.
@@ -110,14 +182,14 @@ traffic out through a client's internet connection (for sites that allow only ce
 - The rebrand patch is regex-based; when bumping `NETBIRD_VERSION`, check the build output for `WARN: leftover brand strings`.
 
 ## Windows installer (.exe)
-`slbzt_windows_setup.exe` (see above) is a real setup program: admin prompt, installs to Program Files, registers the
+`slbzt_windows_setup.exe` is a real setup program: admin prompt, installs to Program Files, registers the
 service (does not modify PATH; run it from the install folder), shows in Add/Remove Programs, includes an uninstaller.
 Uninstall: Settings > Apps, or `"%ProgramFiles%\slbzt\uninstall.exe" /S`.
 The per-architecture `.zip` files still contain `install.ps1` for manual installs; if PowerShell blocks it, use
 `powershell -ExecutionPolicy Bypass -File .\install.ps1`.
 
-## Linux
-Use `slbzt_linux_setup.sh` (see above). The per-CPU `*_linux_{amd64,arm64,arm,386}.tar.gz` archives it downloads can
+## Linux archives
+Normally use `slbzt_linux_setup.sh` (see Installation). The per-CPU `*_linux_{amd64,arm64,arm,386}.tar.gz` archives it downloads can
 also be used by hand: `tar xzf ...; cd ...; sudo ./install.sh [SETUP_KEY]` (same install-or-update behaviour).
 It installs a systemd (or init) service via `slbzt service install`. Static binaries (no libc dependency).
 

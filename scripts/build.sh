@@ -54,7 +54,7 @@ fi
 # ONE Windows setup.exe for all PCs (picks the build at run time; installs or updates)
 if [ -d "$WORK/win/amd64" ] && [ -d "$WORK/win/arm64" ]; then
 NSIS_WIN7=(); [ -d "$WORK/win/win7_amd64" ] && [ -d "$WORK/win/win7_386" ] && NSIS_WIN7=(-DHAVE_WIN7)
-makensis -V1 -DBRAND="$BRAND_NAME" -DDISPLAY="$BRAND_DISPLAY" -DVERSION="$BUILD_VERSION" -DWINDIR="$WORK/win" "${NSIS_WIN7[@]}" \
+makensis -V1 -DBRAND="$BRAND_NAME" -DDISPLAY="$BRAND_DISPLAY" -DVERSION="$BUILD_VERSION" -DWGGUID="$WG_GUID_WINDOWS" -DWINDIR="$WORK/win" "${NSIS_WIN7[@]}" \
   -DOUT="$DIST/${BRAND_NAME}_windows_setup.exe" "$ROOT/installers/windows/installer.nsi"
 fi
 

@@ -27,6 +27,11 @@ build for the PC.
    - **Setup key:** paste your key.
 4. The last page shows the PC's **DNS name** and **IP address** on the VPN.
 
+The setup also keeps the VPN adapter on the **Private** network profile. Windows would otherwise label it an
+"Unidentified network" and treat it as Public, where firewall block rules and "block all incoming connections"
+apply. A hidden scheduled task, "SLBZT network profile", re-applies Private at startup, whenever a network connects
+and every 5 minutes. It touches only the VPN adapter; uninstalling removes it.
+
 **Check** (PowerShell as Administrator):
 ```powershell
 & "$env:ProgramFiles\slbzt\slbzt.exe" status

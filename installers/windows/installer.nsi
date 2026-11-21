@@ -9,6 +9,8 @@
 ;   makensis -DBRAND=slbzt -DDISPLAY=SLBZT -DVERSION=1.1.0 -DWINDIR=<dir with amd64\ arm64\ [win7_amd64\ win7_386\]> [-DHAVE_WIN7] -DOUT=setup.exe installer.nsi
 ;   each subdir holds <BRAND>.exe and wintun.dll
 ;   each subdir also holds <BRAND>-proxy.exe (the separate proxy program, see proxy/)
+; Keeps the VPN adapter on the Private network profile: a hidden scheduled task (SYSTEM) runs set-private.ps1 at
+; startup, on every network connect and every 5 minutes (Windows otherwise puts it on Public as an unidentified network).
 ; Components: the VPN client (always) and the proxy (optional, unticked unless already installed).
 ; Silent install:  setup.exe /S /SETUPKEY=abcd   (optional /MGMT=https://other-server:443)
 ; Silent update:   setup.exe /S                  (an installed proxy is updated too, keeping port and login)
@@ -36,6 +38,10 @@ ManifestSupportedOS all
 !if "${BRAND}" == ""
   !error "BRAND must not be empty"
 !endif
+!ifndef WGGUID
+  !error "WGGUID (the VPN adapter GUID, WG_GUID_WINDOWS in brand.env) must be given"
+!endif
+!define PRIVTASK "${DISPLAY} network profile"
 Name "${DISPLAY}"
 OutFile "${OUT}"
 RequestExecutionLevel admin
@@ -329,6 +335,34 @@ Function WaitForService
     ${EndIf}
 FunctionEnd
 
+
+; Writes the scheduled task that keeps the VPN adapter on the Private profile (UTF-16 XML, as schtasks expects),
+; registers it (replacing an older one) and leaves it to its triggers: startup, network connect, every 5 minutes.
+Function InstallPrivateTask
+  File "/oname=$INSTDIR\set-private.ps1" "set-private.ps1"
+  FileOpen $9 "$PLUGINSDIR\privtask.xml" w
+  FileWriteWord $9 0xFEFF
+  FileWriteUTF16LE $9 '<?xml version="1.0" encoding="UTF-16"?>$\r$\n'
+  FileWriteUTF16LE $9 '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">$\r$\n'
+  FileWriteUTF16LE $9 '<RegistrationInfo><Description>Keeps the ${DISPLAY} VPN adapter on the Private network profile.</Description></RegistrationInfo>$\r$\n'
+  FileWriteUTF16LE $9 '<Triggers>$\r$\n'
+  FileWriteUTF16LE $9 '<BootTrigger><Enabled>true</Enabled><Delay>PT30S</Delay></BootTrigger>$\r$\n'
+  FileWriteUTF16LE $9 '<EventTrigger><Enabled>true</Enabled><Delay>PT5S</Delay><Subscription>&lt;QueryList&gt;&lt;Query Id="0" Path="Microsoft-Windows-NetworkProfile/Operational"&gt;&lt;Select Path="Microsoft-Windows-NetworkProfile/Operational"&gt;*[System[EventID=10000]]&lt;/Select&gt;&lt;/Query&gt;&lt;/QueryList&gt;</Subscription></EventTrigger>$\r$\n'
+  FileWriteUTF16LE $9 '<TimeTrigger><Repetition><Interval>PT5M</Interval><StopAtDurationEnd>false</StopAtDurationEnd></Repetition><StartBoundary>2020-01-01T00:00:00</StartBoundary><Enabled>true</Enabled></TimeTrigger>$\r$\n'
+  FileWriteUTF16LE $9 '</Triggers>$\r$\n'
+  FileWriteUTF16LE $9 '<Principals><Principal id="Author"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>$\r$\n'
+  FileWriteUTF16LE $9 '<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><ExecutionTimeLimit>PT2M</ExecutionTimeLimit><Hidden>true</Hidden><Enabled>true</Enabled></Settings>$\r$\n'
+  FileWriteUTF16LE $9 '<Actions Context="Author"><Exec><Command>powershell.exe</Command><Arguments>-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "$INSTDIR\set-private.ps1" -AdapterGuid ${WGGUID}</Arguments></Exec></Actions>$\r$\n'
+  FileWriteUTF16LE $9 '</Task>$\r$\n'
+  FileClose $9
+  nsExec::ExecToLog '"$SYSDIR\schtasks.exe" /Create /TN "${PRIVTASK}" /XML "$PLUGINSDIR\privtask.xml" /F'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "Could not register the network-profile task (code $0); the VPN adapter may stay on the Public profile."
+  ${EndIf}
+  Delete "$PLUGINSDIR\privtask.xml"
+FunctionEnd
+
 !macro PutFiles V
   File "/oname=${BRAND}.exe" "${WINDIR}/${V}/${BRAND}.exe"
   File "/oname=wintun.dll" "${WINDIR}/${V}/wintun.dll"
@@ -401,6 +435,7 @@ Section "${DISPLAY} VPN client" SEC_CLIENT
     Abort
   ${EndIf}
   Call WaitForService
+  Call InstallPrivateTask
 
   ; Connect. Fresh install: with the key (passed via a temp file, not the command line).
   ; Update without a key: do NOT run `up`. The service reconnects by itself with the saved config; if
@@ -536,6 +571,7 @@ Section "${DISPLAY} VPN client" SEC_CLIENT
     SetErrorLevel 4
   ${EndIf}
   connect_done:
+  nsExec::Exec '"$SYSDIR\schtasks.exe" /Run /TN "${PRIVTASK}"'   ; set Private now, if the adapter is up
 SectionEnd
 
 ; ---------------------------------------------------------------- proxy (separate program + service)
@@ -834,6 +870,8 @@ FunctionEnd
 
 Section "Uninstall"
   SetShellVarContext all
+  nsExec::Exec '"$SYSDIR\schtasks.exe" /Delete /TN "${PRIVTASK}" /F'
+  Delete "$INSTDIR\set-private.ps1"
   ${If} ${FileExists} "$INSTDIR\${BRAND}-proxy.exe"
     nsExec::Exec '"$INSTDIR\${BRAND}-proxy.exe" service stop'
     nsExec::Exec '"$INSTDIR\${BRAND}-proxy.exe" service uninstall'

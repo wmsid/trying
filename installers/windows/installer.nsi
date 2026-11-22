@@ -409,7 +409,7 @@ Function InstallPrivateTask
   FileWriteUTF16LE $9 '</Triggers>$\r$\n'
   FileWriteUTF16LE $9 '<Principals><Principal id="Author"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>$\r$\n'
   FileWriteUTF16LE $9 '<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><ExecutionTimeLimit>PT2M</ExecutionTimeLimit><Hidden>true</Hidden><Enabled>true</Enabled></Settings>$\r$\n'
-  FileWriteUTF16LE $9 '<Actions Context="Author"><Exec><Command>powershell.exe</Command><Arguments>-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "$INSTDIR\set-private.ps1" -AdapterGuid ${WGGUID} -InterfaceAlias ${WGIFACE}</Arguments></Exec></Actions>$\r$\n'
+  FileWriteUTF16LE $9 '<Actions Context="Author"><Exec><Command>%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe</Command><Arguments>-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "$INSTDIR\set-private.ps1" -AdapterGuid ${WGGUID} -InterfaceAlias ${WGIFACE}</Arguments></Exec></Actions>$\r$\n'
   FileWriteUTF16LE $9 '</Task>$\r$\n'
   FileClose $9
   nsExec::ExecToLog '"$SYSDIR\schtasks.exe" /Create /TN "${PRIVTASK}" /XML "$PLUGINSDIR\privtask.xml" /F'

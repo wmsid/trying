@@ -41,6 +41,9 @@ ManifestSupportedOS all
 !ifndef WGGUID
   !error "WGGUID (the VPN adapter GUID, WG_GUID_WINDOWS in brand.env) must be given"
 !endif
+!ifndef WGIFACE
+  !error "WGIFACE (the VPN adapter name, WG_IFACE in brand.env) must be given"
+!endif
 !define PRIVTASK "${DISPLAY} network profile"
 Name "${DISPLAY}"
 OutFile "${OUT}"
@@ -318,6 +321,60 @@ Function TrimEnd
   Exch $R0
 FunctionEnd
 
+; $0 = 1 when every program file this setup replaces can be opened for writing (no process holds it)
+Function FilesFree
+  StrCpy $0 1
+  ${ForEach} $1 0 2 + 1
+    ${If} $1 == 0
+      StrCpy $2 "$INSTDIR\${BRAND}.exe"
+    ${ElseIf} $1 == 1
+      StrCpy $2 "$INSTDIR\${BRAND}-proxy.exe"
+    ${Else}
+      StrCpy $2 "$INSTDIR\wintun.dll"
+    ${EndIf}
+    ${If} ${FileExists} "$2"
+      ClearErrors
+      FileOpen $3 "$2" a
+      ${If} ${Errors}
+        StrCpy $0 0
+      ${Else}
+        FileClose $3
+      ${EndIf}
+    ${EndIf}
+  ${Next}
+  ClearErrors
+FunctionEnd
+
+; Stops the proxy first (it runs <brand>.exe status every few seconds), then the VPN service, and waits until
+; the files can really be replaced: up to 30 s, force-closing leftover processes after 20 s.
+Function StopForUpdate
+  ${If} ${FileExists} "$INSTDIR\${BRAND}-proxy.exe"
+    DetailPrint "Stopping ${DISPLAY} Proxy"
+    nsExec::Exec '"$INSTDIR\${BRAND}-proxy.exe" service stop'
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\${BRAND}.exe"
+    DetailPrint "Stopping ${DISPLAY}"
+    nsExec::Exec '"$INSTDIR\${BRAND}.exe" service stop'
+    nsExec::Exec '"$INSTDIR\${BRAND}.exe" service uninstall'
+  ${EndIf}
+  StrCpy $R9 0
+  unlock_loop:
+    Call FilesFree
+    ${If} $0 == 1
+      Return
+    ${EndIf}
+    IntOp $R9 $R9 + 1
+    ${If} $R9 == 20
+      DetailPrint "Closing ${DISPLAY} processes that are still running"
+      nsExec::Exec '"$SYSDIR\taskkill.exe" /F /IM ${BRAND}-proxy.exe'
+      nsExec::Exec '"$SYSDIR\taskkill.exe" /F /IM ${BRAND}.exe'
+    ${EndIf}
+    ${If} $R9 < 30
+      Sleep 1000
+      Goto unlock_loop
+    ${EndIf}
+FunctionEnd
+
 ; Waits (up to ~15 s) until the service answers, so `up` does not race the service start.
 Function WaitForService
   StrCpy $R5 0
@@ -352,7 +409,7 @@ Function InstallPrivateTask
   FileWriteUTF16LE $9 '</Triggers>$\r$\n'
   FileWriteUTF16LE $9 '<Principals><Principal id="Author"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>$\r$\n'
   FileWriteUTF16LE $9 '<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><ExecutionTimeLimit>PT2M</ExecutionTimeLimit><Hidden>true</Hidden><Enabled>true</Enabled></Settings>$\r$\n'
-  FileWriteUTF16LE $9 '<Actions Context="Author"><Exec><Command>powershell.exe</Command><Arguments>-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "$INSTDIR\set-private.ps1" -AdapterGuid ${WGGUID}</Arguments></Exec></Actions>$\r$\n'
+  FileWriteUTF16LE $9 '<Actions Context="Author"><Exec><Command>powershell.exe</Command><Arguments>-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "$INSTDIR\set-private.ps1" -AdapterGuid ${WGGUID} -InterfaceAlias ${WGIFACE}</Arguments></Exec></Actions>$\r$\n'
   FileWriteUTF16LE $9 '</Task>$\r$\n'
   FileClose $9
   nsExec::ExecToLog '"$SYSDIR\schtasks.exe" /Create /TN "${PRIVTASK}" /XML "$PLUGINSDIR\privtask.xml" /F'
@@ -391,11 +448,8 @@ Section "${DISPLAY} VPN client" SEC_CLIENT
   SectionIn RO
   InitPluginsDir
   SetOutPath "$INSTDIR"
-  ; Stop the running copy (fresh install over a broken one, or an update); config is NOT touched
-  IfFileExists "$INSTDIR\${BRAND}.exe" 0 +4
-    nsExec::Exec '"$INSTDIR\${BRAND}.exe" service stop'
-    nsExec::Exec '"$INSTDIR\${BRAND}.exe" service uninstall'
-    Sleep 1500
+  ; Stop the running copies (fresh install over a broken one, or an update); config is NOT touched
+  Call StopForUpdate
   DetailPrint "Installing the $Variant build"
   ${If} $Variant == "arm64"
     !insertmacro PutFiles arm64
@@ -872,6 +926,7 @@ Section "Uninstall"
   SetShellVarContext all
   nsExec::Exec '"$SYSDIR\schtasks.exe" /Delete /TN "${PRIVTASK}" /F'
   Delete "$INSTDIR\set-private.ps1"
+  Delete "$INSTDIR\set-private.log"
   ${If} ${FileExists} "$INSTDIR\${BRAND}-proxy.exe"
     nsExec::Exec '"$INSTDIR\${BRAND}-proxy.exe" service stop'
     nsExec::Exec '"$INSTDIR\${BRAND}-proxy.exe" service uninstall'
